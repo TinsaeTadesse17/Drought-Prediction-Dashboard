@@ -1,0 +1,24 @@
+/* Improve dark mode contrast for content sections */
+:root {
+  /* ...existing variables... */
+}
+
+.dark {
+  --color-bg-card: #0b0f14; /* slightly darker than default */
+  --color-muted: #9aa5b1;   /* brighter muted text */
+  --color-border: #2b3440;  /* clearer borders */
+}
+
+/* Utility overrides using CSS variables for components that rely on tailwind tokens */
+.dark .bg-card { background-color: var(--color-bg-card) !important; }
+.dark .text-muted-foreground { color: var(--color-muted) !important; }
+.dark .border { border-color: var(--color-border) !important; }
+
+/* Reports badges readability */
+.dark .badge[data-variant="outline"],
+.dark .border-red-500 { border-color: #ef4444 !important; }
+.dark .text-red-600 { color: #f87171 !important; }
+
+/* Data page progress labels */
+.dark .text-green-600 { color: #34d399 !important; }
+.dark .text-blue-600 { color: #60a5fa !important; }
