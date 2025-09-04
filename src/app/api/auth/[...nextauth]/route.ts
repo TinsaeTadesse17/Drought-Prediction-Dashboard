@@ -9,7 +9,7 @@ const users = [
   { id: '3', name: 'Somali Officer', email: 'somali.officer@example.com', role: 'woreda_officer', region: 'somali' as Region, woreda: 'Gode' },
 ]
 
-export const authOptions: NextAuthOptions = {
+const authOptions: NextAuthOptions = {
   providers: [
     Credentials({
       name: 'Credentials',
