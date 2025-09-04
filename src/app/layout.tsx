@@ -4,6 +4,7 @@ import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AppSessionProvider } from '@/components/app-session-provider'
 
 export const metadata: Metadata = {
   title: "Drought Early Warning System",
@@ -29,7 +30,7 @@ html {
       </head>
       <body>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-          {children}
+          <AppSessionProvider>{children}</AppSessionProvider>
         </ThemeProvider>
       </body>
     </html>

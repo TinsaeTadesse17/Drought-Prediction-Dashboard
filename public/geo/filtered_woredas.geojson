@@ -1,0 +1,149 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.89101550417582, 12.80325486128825],
+            [40.87566319062178, 12.809174873461968],
+            [40.86243480616093, 12.8142751916424],
+            [40.85079936851997, 12.819421048378016],
+            [40.83863294860572, 12.82449859728086]
+          ]
+        ]
+      },
+      "properties": {
+        "OBJECTID": 942,
+        "Shape_Leng": 1.50046396422,
+        "ADM3_EN": "Elidar",
+        "ADM3_PCODE": "ET020501",
+        "ADM2_EN": "Hari /Zone 5",
+        "ADM1_EN": "Afar",
+        "ADM0_EN": "Ethiopia"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.7446, 11.607],
+            [40.74, 11.639],
+            [40.7349, 11.6626],
+            [40.7247, 11.6866],
+            [40.7091, 11.7027]
+          ]
+        ]
+      },
+      "properties": {
+        "OBJECTID": null,
+        "Shape_Leng": null,
+        "ADM3_EN": "Bidu",
+        "ADM3_PCODE": null,
+        "ADM2_EN": null,
+        "ADM1_EN": null,
+        "ADM0_EN": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.4623, 11.5221],
+            [40.4854, 11.51],
+            [40.5521, 11.4817],
+            [40.6238, 11.4573],
+            [40.6278, 11.4249]
+          ]
+        ]
+      },
+      "properties": {
+        "OBJECTID": null,
+        "Shape_Leng": null,
+        "ADM3_EN": "Kori",
+        "ADM3_PCODE": null,
+        "ADM2_EN": null,
+        "ADM1_EN": null,
+        "ADM0_EN": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.1806, 13.4698],
+            [40.1388, 13.4463],
+            [40.0993, 13.4364],
+            [40.0368, 13.435],
+            [39.9828, 13.4372]
+          ]
+        ]
+      },
+      "properties": {
+        "OBJECTID": null,
+        "Shape_Leng": null,
+        "ADM3_EN": "Gode",
+        "ADM3_PCODE": null,
+        "ADM2_EN": null,
+        "ADM1_EN": null,
+        "ADM0_EN": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.04179015968664, 12.568526378600353],
+            [40.03871969697583, 12.567729453884661],
+            [40.03382542558718, 12.566431605061961],
+            [40.024567865083164, 12.564018061637292],
+            [40.01888866337746, 12.565498064680721]
+          ]
+        ]
+      },
+      "properties": {
+        "OBJECTID": 1019,
+        "Shape_Leng": 1.18544226054,
+        "ADM3_EN": "Fik",
+        "ADM3_PCODE": "ET020404",
+        "ADM2_EN": "Fanti /Zone 4",
+        "ADM1_EN": "Afar",
+        "ADM0_EN": "Ethiopia"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.7774, 9.69],
+            [40.7595, 9.6979],
+            [40.75, 9.7052],
+            [40.7436, 9.7089],
+            [40.7409, 9.7191]
+          ]
+        ]
+      },
+      "properties": {
+        "OBJECTID": null,
+        "Shape_Leng": null,
+        "ADM3_EN": "Hargele",
+        "ADM3_PCODE": null,
+        "ADM2_EN": null,
+        "ADM1_EN": null,
+        "ADM0_EN": null
+      }
+    }
+  ]
+}

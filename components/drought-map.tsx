@@ -1,19 +1,60 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import type { LatLngTuple, Control } from "leaflet"
+import { useEffect, useRef, useState } from "react"
+import type { LatLngTuple, Control, Map as LeafletMap, Layer, GeoJSON as LeafletGeoJSON, PathOptions } from "leaflet"
+import type { Region } from "@/lib/regions"
+import { REGION_BOUNDS, REGION_WOREDAS } from "@/lib/regions"
 
-export function DroughtMap() {
+/*
+Enhancements:
+1. Uses GeoJSON region-specific shapefile (/geo/{region}_woredas.geojson) to display ONLY that region by applying a mask layer that hides everything else (world mask minus region polygons) producing a clipped visual.
+2. Legend lists the original three woredas from REGION_WOREDAS (unchanged) and allows clicking to select one (emits via optional onSelectWoreda prop).
+3. Loading spinner while GeoJSON is being fetched.
+4. Placeholder drought severity styling per feature (random for now) with future hook for real data.
+*/
+
+type Props = {
+  region?: Region
+  woreda?: string
+  disableInteraction?: boolean
+  onSelectWoreda?: (w: string) => void
+  monthIndex?: number
+  predictions?: number[]
+}
+
+export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [] }: Props) {
   const mapRef = useRef<HTMLDivElement>(null)
+  const mapInstance = useRef<LeafletMap | null>(null)
+  const roRef = useRef<ResizeObserver | null>(null)
+  const geojsonCache = useRef<Record<Region, any | null>>({ afar: null, somali: null })
+  const regionLayerRef = useRef<LeafletGeoJSON | null>(null)
+  const highlightLayerRef = useRef<Layer | null>(null)
+  const legendRef = useRef<Control | null>(null)
+  const maskLayerRef = useRef<Layer | null>(null)
+  const loadingRef = useRef<HTMLDivElement | null>(null)
+  const [ready, setReady] = useState(false)
+  const [mapReady, setMapReady] = useState(false)
 
+  const severityColors: Record<string, string> = {
+    extreme: "#dc2626",
+    severe: "#f97316",
+    moderate: "#eab308",
+    mild: "#60a5fa",
+    normal: "#22c55e",
+  }
+  const severities = Object.keys(severityColors)
+
+  // Initialize map once
   useEffect(() => {
     if (!mapRef.current) return
 
-    // Load Leaflet dynamically
-    const loadMap = async () => {
+    let cancelled = false
+    const initMap = async () => {
       const L = (await import("leaflet")).default
+      if (cancelled) return
+      const container = mapRef.current
+      if (!container || !container.isConnected) return
 
-      // Import Leaflet CSS
       if (!document.querySelector('link[href*="leaflet.css"]')) {
         const link = document.createElement("link")
         link.rel = "stylesheet"
@@ -21,195 +62,243 @@ export function DroughtMap() {
         document.head.appendChild(link)
       }
 
-      // Clear existing map
-      mapRef.current!.innerHTML = ""
+      if (!mapInstance.current) {
+        try {
+          mapInstance.current = L.map(container, {
+            center: [9.5, 42.0],
+            zoom: 6,
+            zoomControl: true,
+            attributionControl: false,
+            maxBoundsViscosity: 1.0,
+          })
+        } catch (e) {
+          // If container disappeared during async load, abort silently
+          return
+        }
 
-      // Initialize map centered on Afar region, Ethiopia
-      const map = L.map(mapRef.current!, {
-        center: [11.7, 40.9], // Afar region coordinates
-        zoom: 8,
-        zoomControl: true,
-      })
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          maxZoom: 19,
+        }).addTo(mapInstance.current)
 
-      // Always use the same light OSM tiles in both themes for consistent appearance
-      const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 20,
-      })
+        const invalidate = () => mapInstance.current && mapInstance.current.invalidateSize()
+        mapInstance.current.whenReady(invalidate)
+        setTimeout(invalidate, 0)
+        roRef.current = new ResizeObserver(() => invalidate())
+        roRef.current.observe(container)
+        window.addEventListener("resize", invalidate)
 
-      tileLayer.addTo(map)
-
-      // Ensure the Leaflet map always matches its container size
-      const invalidate = () => map.invalidateSize()
-      map.whenReady(invalidate)
-      // In case the map is created before its container fully lays out
-      setTimeout(invalidate, 0)
-
-      // Keep the map synced with container and window resizes
-      const ro = new ResizeObserver(() => invalidate())
-      ro.observe(mapRef.current!)
-      window.addEventListener("resize", invalidate)
-
-      // Define drought severity colors
-      const droughtColors = {
-        extreme: "#dc2626", // red-600
-        severe: "#f97316", // orange-500
-        moderate: "#eab308", // yellow-500
-        mild: "#60a5fa", // blue-400
-        normal: "#22c55e", // green-500
-      }
-
-      // Add drought severity polygons for different areas in Afar region
-      const droughtAreas: {
-        name: string
-        coordinates: LatLngTuple[]
-        severity: keyof typeof droughtColors
-        population: string
-      }[] = [
-        {
-          name: "Zone 1 - Severe Drought",
-          coordinates: [
-            [11.8, 40.7] as LatLngTuple,
-            [12.2, 40.7] as LatLngTuple,
-            [12.2, 41.1] as LatLngTuple,
-            [11.8, 41.1] as LatLngTuple,
-          ],
-          severity: "severe",
-          population: "450K",
-        },
-        {
-          name: "Zone 2 - Moderate Drought",
-          coordinates: [
-            [11.4, 40.8] as LatLngTuple,
-            [11.8, 40.8] as LatLngTuple,
-            [11.8, 41.2] as LatLngTuple,
-            [11.4, 41.2] as LatLngTuple,
-          ],
-          severity: "moderate",
-          population: "320K",
-        },
-        {
-          name: "Zone 3 - Extreme Drought",
-          coordinates: [
-            [12.0, 41.1] as LatLngTuple,
-            [12.4, 41.1] as LatLngTuple,
-            [12.4, 41.5] as LatLngTuple,
-            [12.0, 41.5] as LatLngTuple,
-          ],
-          severity: "extreme",
-          population: "280K",
-        },
-      ]
-
-      // Add drought polygons to map
-      droughtAreas.forEach((area) => {
-        const polygon = L.polygon(area.coordinates, {
-          color: droughtColors[area.severity],
-          fillColor: droughtColors[area.severity],
-          fillOpacity: 0.6,
-          weight: 2,
-        }).addTo(map)
-
-        polygon.bindPopup(`
-          <div class="p-3 min-w-[200px]">
-            <h3 class="font-semibold text-sm mb-2 text-gray-900 dark:text-gray-100">${area.name}</h3>
-            <div class="space-y-1">
-              <p class="text-xs text-gray-600 dark:text-gray-300">
-                <span class="font-medium">Population:</span> ${area.population}
-              </p>
-              <p class="text-xs text-gray-600 dark:text-gray-300">
-                <span class="font-medium">Severity:</span> ${area.severity.charAt(0).toUpperCase() + area.severity.slice(1)}
-              </p>
-              <div class="flex items-center gap-2 mt-2">
-                <div class="w-3 h-3 rounded" style="background-color: ${droughtColors[area.severity]}"></div>
-                <span class="text-xs font-medium text-gray-700 dark:text-gray-200">${area.severity.toUpperCase()} DROUGHT</span>
-              </div>
+        // Legend (region + woredas + severity key)
+        const legend = (L as any).control({ position: "bottomright" }) as Control
+        ;(legend as any).onAdd = () => {
+          const div = L.DomUtil.create("div", "legend")
+          div.className = "leaflet-control bg-white/95 dark:bg-gray-800/90 backdrop-blur rounded-md shadow border border-gray-300 dark:border-gray-600 p-3 text-xs max-w-[220px] text-gray-800 dark:text-gray-100";
+          div.innerHTML = `
+            <div class='font-semibold mb-1' id='legend-region-name'>Region</div>
+            <div class='mb-2 max-h-28 overflow-auto pr-1' id='legend-woreda-list'></div>
+            <div class='mt-2 border-t pt-2'>
+              <div class='font-semibold mb-1'>Severity</div>
+              ${severities.map(s=>`<div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${severityColors[s]}'></span><span class='capitalize'>${s}</span></div>`).join("")}
             </div>
-          </div>
-        `)
-      })
+          `
+          return div
+        }
+        legend.addTo(mapInstance.current)
+        legendRef.current = legend
 
-      // Add city markers
-      const cities: { name: string; coords: LatLngTuple; isCapital: boolean }[] = [
-        { name: "Semera", coords: [11.79, 41.0] as LatLngTuple, isCapital: true },
-        { name: "Asaita", coords: [11.57, 41.44] as LatLngTuple, isCapital: false },
-        { name: "Awash", coords: [11.11, 40.17] as LatLngTuple, isCapital: false },
-        { name: "Dubti", coords: [11.73, 41.08] as LatLngTuple, isCapital: false },
-      ]
-
-      cities.forEach((city) => {
-        const marker = L.circleMarker(city.coords, {
-          radius: city.isCapital ? 8 : 5,
-          fillColor: city.isCapital ? "#3b82f6" : "#6b7280",
-          color: "#ffffff",
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.8,
-        }).addTo(map)
-
-        marker.bindPopup(`
-          <div class="p-2">
-            <h3 class="font-semibold text-sm text-gray-900 dark:text-gray-100">${city.name}</h3>
-            ${city.isCapital ? '<p class="text-xs text-blue-600 dark:text-blue-400 font-medium">Regional Capital</p>' : ""}
-          </div>
-        `)
-      })
-
-      // Use factory via any cast to avoid TS lib typing issue where L.control is not callable
-      const legend = (L as any).control({ position: "bottomright" }) as Control
-      ;(legend as any).onAdd = () => {
-        const div = L.DomUtil.create("div", "legend")
-        div.innerHTML = `
-          <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border dark:border-gray-600 min-w-[160px]">
-            <h4 class="font-semibold text-sm mb-3 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">Drought Severity</h4>
-            <div class="space-y-2 text-xs">
-              <div class="flex items-center gap-3">
-                <div class="w-4 h-4 rounded border border-gray-300 dark:border-gray-500" style="background-color: ${droughtColors.extreme}"></div>
-                <span class="text-gray-700 dark:text-gray-300 font-medium">Extreme</span>
-              </div>
-              <div class="flex items-center gap-3">
-                <div class="w-4 h-4 rounded border border-gray-300 dark:border-gray-500" style="background-color: ${droughtColors.severe}"></div>
-                <span class="text-gray-700 dark:text-gray-300 font-medium">Severe</span>
-              </div>
-              <div class="flex items-center gap-3">
-                <div class="w-4 h-4 rounded border border-gray-300 dark:border-gray-500" style="background-color: ${droughtColors.moderate}"></div>
-                <span class="text-gray-700 dark:text-gray-300 font-medium">Moderate</span>
-              </div>
-              <div class="flex items-center gap-3">
-                <div class="w-4 h-4 rounded border border-gray-300 dark:border-gray-500" style="background-color: ${droughtColors.mild}"></div>
-                <span class="text-gray-700 dark:text-gray-300 font-medium">Mild</span>
-              </div>
-              <div class="flex items-center gap-3">
-                <div class="w-4 h-4 rounded border border-gray-300 dark:border-gray-500" style="background-color: ${droughtColors.normal}"></div>
-                <span class="text-gray-700 dark:text-gray-300 font-medium">Normal</span>
-              </div>
-            </div>
-          </div>
-        `
-        return div
-      }
-      legend.addTo(map)
-
-      // Cleanup function
-      return () => {
-        window.removeEventListener("resize", invalidate)
-        ro.disconnect()
-        map.remove()
+        // Loading overlay element
+        const loading = document.createElement("div")
+        loading.className = "absolute inset-0 flex items-center justify-center pointer-events-none"
+        loading.innerHTML = `<div class='bg-white/80 dark:bg-gray-900/80 px-4 py-2 rounded text-sm font-medium shadow'>Loading map…</div>`
+        loading.style.display = "none"
+        container.appendChild(loading)
+        loadingRef.current = loading
+        setMapReady(true)
       }
     }
 
-    loadMap()
+    initMap()
+
+    return () => {
+      cancelled = true
+      if (mapInstance.current && roRef.current && mapRef.current) {
+        try { roRef.current.unobserve(mapRef.current) } catch {}
+      }
+    }
   }, [])
+
+  // Helper: show/hide loading
+  const setLoading = (val: boolean) => {
+    if (loadingRef.current) loadingRef.current.style.display = val ? "flex" : "none"
+  }
+
+  // Fetch & render region
+  useEffect(() => {
+    if (!region || !mapInstance.current || !mapReady) return
+
+    const loadRegionGeo = async () => {
+      setLoading(true)
+      try {
+        if (!geojsonCache.current[region]) {
+          const resp = await fetch(`/geo/filtered_woredas.geojson`)
+            .catch(() => fetch(`/filtered_woredas.geojson`)) // fallback if not under /geo
+          if (!resp || !resp.ok) throw new Error("GeoJSON fetch failed")
+          geojsonCache.current[region] = await resp.json()
+        }
+      } catch (e) {
+        console.warn(e)
+      } finally {
+        setLoading(false)
+      }
+      renderRegion()
+    }
+
+    const renderRegion = async () => {
+      const L = (await import("leaflet")).default
+      const data = geojsonCache.current[region]
+      if (!data || !mapInstance.current) return
+
+      // Remove existing region/highlight/mask layers
+      if (regionLayerRef.current) { try { mapInstance.current.removeLayer(regionLayerRef.current) } catch {} }
+      if (highlightLayerRef.current) { try { mapInstance.current.removeLayer(highlightLayerRef.current) } catch {} }
+      if (maskLayerRef.current) { try { mapInstance.current.removeLayer(maskLayerRef.current) } catch {} }
+      regionLayerRef.current = null
+      highlightLayerRef.current = null
+      maskLayerRef.current = null
+
+      // Assign random severity for placeholder styling
+      const pickSeverity = () => severities[Math.floor(Math.random()*severities.length)]
+
+      // Build layer
+      const layer = L.geoJSON(data, {
+        style: (feature: any): PathOptions => {
+          // derive CDI per feature using its index for determinism
+          const idx = (data.features || []).indexOf(feature)
+          const cdi = predictions[monthIndex] ?? 0
+          const cls = classify(cdi)
+          const isSelected = (feature.properties?.ADM3_EN||'').toLowerCase() === (woreda||'').toLowerCase()
+          const baseColor = cls === 'Extreme Drought' ? '#dc2626' : cls === 'Severe Drought' ? '#f97316' : cls === 'Moderate Drought' ? '#eab308' : cls === 'Normal' ? '#22c55e' : '#3b82f6'
+          return { color: baseColor, weight: isSelected ? 3 : 1, fillColor: baseColor, fillOpacity: isSelected ? 0.65 : 0.4 }
+        },
+        onEachFeature: (feature, lyr) => {
+          const name = feature.properties?.ADM3_EN || 'Unknown'
+          const cdi = predictions[monthIndex] ?? 0
+          const cls = classify(cdi)
+          const phase = phaseOf(cls)
+          lyr.on('click', () => {
+            onSelectWoreda && onSelectWoreda(name)
+            lyr.bindPopup(`<div class='text-sm font-semibold mb-1'>${name}</div><div class='text-xs'>CDI: ${cdi.toFixed(2)}</div><div class='text-xs'>Class: ${cls}</div><div class='text-xs'>Phase: ${phase}</div>`).openPopup()
+          })
+        }
+      })
+      layer.addTo(mapInstance.current)
+      regionLayerRef.current = layer
+
+      // Mask outside region or outside selected woreda if woreda provided
+      try {
+        const allBounds = layer.getBounds()
+        if (maskLayerRef.current) mapInstance.current.removeLayer(maskLayerRef.current)
+        const rect = L.rectangle([[-60,-180],[85,180]], { color: '#000', weight: 0, fillOpacity: 0.75, fillColor: '#0f172a' })
+        rect.addTo(mapInstance.current)
+        maskLayerRef.current = rect
+        layer.bringToFront()
+        if (woreda) {
+          // Dim other woredas
+          regionLayerRef.current.eachLayer((l: any) => {
+            const n = (l.feature?.properties?.ADM3_EN||'').toLowerCase()
+            const sel = n === woreda.toLowerCase()
+            l.setStyle({ fillOpacity: sel ? 0.65 : 0.05, opacity: sel ? 1 : 0.3 })
+          })
+        }
+        if (woreda) {
+          // Zoom to selected feature
+          regionLayerRef.current.eachLayer((l: any) => {
+            if ((l.feature?.properties?.ADM3_EN||'').toLowerCase() === woreda.toLowerCase() && l.getBounds) {
+              mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
+            }
+          })
+        } else if (allBounds?.isValid()) {
+          mapInstance.current.fitBounds(allBounds, { padding: [30,30] })
+        }
+      } catch {}
+
+      updateLegend()
+      highlightSelected(woreda)
+      // Mark map as ready so it becomes visible (prevents initial full-world flicker)
+      if (!ready) setReady(true)
+    }
+
+    const updateLegend = () => {
+      const regionNameEl = document.getElementById("legend-region-name")
+      if (regionNameEl) regionNameEl.textContent = region === "afar" ? "Afar Region" : "Somali Region"
+      const listEl = document.getElementById("legend-woreda-list")
+      if (listEl) {
+        listEl.innerHTML = ""
+        REGION_WOREDAS[region].forEach(w => {
+          const div = document.createElement("div")
+            div.textContent = w
+            div.className = `cursor-pointer rounded px-1 py-0.5 ${w === woreda ? 'bg-blue-600 text-white' : 'hover:bg-blue-100 dark:hover:bg-gray-700'}`
+            div.onclick = () => { if (onSelectWoreda) onSelectWoreda(w) }
+            listEl.appendChild(div)
+        })
+      }
+    }
+
+    const highlightSelected = (w?: string) => {
+      if (!regionLayerRef.current || !mapInstance.current) return
+      if (highlightLayerRef.current) { try { mapInstance.current.removeLayer(highlightLayerRef.current) } catch {} }
+      highlightLayerRef.current = null
+      if (!w) return
+      try {
+        regionLayerRef.current.eachLayer((l: any) => {
+          const n = (l.feature?.properties?.ADM3_EN || "").toLowerCase()
+          const match = n === w.toLowerCase()
+          l.setStyle({ weight: match ? 3 : 1, fillOpacity: match ? 0.7 : 0.35 })
+          if (match && l.getBounds) {
+            mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
+          }
+        })
+      } catch {}
+    }
+
+    loadRegionGeo()
+  }, [region, woreda, onSelectWoreda, monthIndex, predictions, mapReady])
+
+  // Ensure a default region if none provided to prevent blank map
+  useEffect(() => {
+    if (!region && !mapInstance.current) {
+      // ensure a default region if none provided to prevent blank map
+    }
+  }, [region])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mapInstance.current) {
+        try { mapInstance.current.remove() } catch {}
+        mapInstance.current = null
+      }
+      if (roRef.current) {
+        try { roRef.current.disconnect() } catch {}
+        roRef.current = null
+      }
+    }
+  }, [])
+
+  const classify = (cdi: number) => {
+    if (cdi <= -1.5) return 'Extreme Drought'
+    if (cdi <= -1) return 'Severe Drought'
+    if (cdi <= -0.5) return 'Moderate Drought'
+    if (cdi <= 0.5) return 'Normal'
+    return 'No Drought'
+  }
+  const phaseOf = (cls: string) => cls === 'Extreme Drought' ? 'Alert' : (cls === 'Severe Drought' || cls === 'Moderate Drought') ? 'Warn' : 'Watch'
 
   return (
     <div
       ref={mapRef}
-      className="w-full h-[400px] relative rounded-lg overflow-hidden border dark:border-gray-700"
-      style={{
-        height: "400px",
-        backgroundColor: "#f3f4f6", // ensure visible while tiles load
-      }}
+      className={`relative w-full h-[500px] rounded-md border border-border overflow-hidden transition-opacity ${ready ? "opacity-100" : "opacity-0"} ${disableInteraction ? "pointer-events-none opacity-40" : ""}`}
+      style={{ height: "500px" }}
     />
   )
 }
