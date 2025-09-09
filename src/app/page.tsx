@@ -1,5 +1,7 @@
 "use client"
 
+export const dynamic = "force-dynamic"
+
 import { DroughtDashboard } from "@/components/drought-dashboard"
 import { getCurrentUser } from "@/lib/auth"
 import { useEffect, useState, useRef } from "react"
