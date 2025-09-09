@@ -1,5 +1,9 @@
-export { default } from 'next-auth/middleware'
+import type { NextRequest } from 'next/server'
 
-export const config = {
-  matcher: ['/((?!api|_next|static|auth|favicon.ico).*)']
+// No-op middleware to disable NextAuth enforcement in this demo build.
+export function middleware(_req: NextRequest) {
+  return
 }
+
+// Match nothing; keep file present without affecting routes.
+export const config = { matcher: [] }

@@ -14,7 +14,6 @@ import { REGION_WOREDAS } from "@/lib/regions"
 import { getCurrentUser, loginByEmail, logout as authLogout } from "@/lib/auth"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu"
 import { useRouter } from "next/navigation"
-import { useSession, signIn, signOut } from 'next-auth/react'
 import { ThemeToggle } from "@/components/theme-toggle"
 import Image from 'next/image'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
@@ -74,7 +73,6 @@ export function DroughtDashboard() {
   const [yearMonth, setYearMonth] = useState([0])
   const [lang, setLang] = useState("en")
   const [translatedTitle, setTranslatedTitle] = useState<string | null>(null)
-  const { data: session } = useSession()
   const [user, setUser] = useState<any>(null)
   const [accountOpen, setAccountOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -182,12 +180,12 @@ export function DroughtDashboard() {
     }
   }, [currentPhase, currentCDI, selectedRegion, selectedWoreda, user])
 
-  useEffect(()=>{ if (session) { const sessRegion = (session as any).region || 'afar'; const sessWoreda = (session as any).woreda; setUser({ role: (session as any).role||'admin', allowedRegions: (session as any).role==='admin'?['afar','somali']:[sessRegion], placeOfInterest: { region: sessRegion, woreda: sessWoreda } }); setSelectedRegion(sessRegion); setSelectedWoreda(sessWoreda); } }, [session])
+  // If integrating NextAuth later, map session -> user here.
 
   const handleLogout = async () => {
     try { authLogout() } catch {}
     setUser(null)
-    try { await signOut({ redirect: false }) } catch {}
+  // NextAuth signOut not used in this demo build.
     setAccountOpen(false)
     router.replace('/auth/login')
   }
@@ -318,7 +316,7 @@ export function DroughtDashboard() {
                 </>) : (<>
                   <DropdownMenuLabel className="text-sm font-medium">Login</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={()=>signIn()}>Sign In</DropdownMenuItem>
+                  <DropdownMenuItem onClick={()=>router.push('/auth/login')}>Sign In</DropdownMenuItem>
                 </>)}
               </DropdownMenuContent>
             </DropdownMenu>
