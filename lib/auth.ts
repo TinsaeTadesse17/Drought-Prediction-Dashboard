@@ -1,6 +1,6 @@
 import type { Region } from "@/lib/regions"
 
-export type Role = "admin" | "regional_officer" | "woreda_officer"
+export type Role = "admin" | "regional_officer" | "woreda_officer" | "civilian"
 
 export type PlaceOfInterest = {
   region: Region
