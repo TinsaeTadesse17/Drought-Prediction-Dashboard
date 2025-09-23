@@ -34,10 +34,9 @@ export default function ReportsPage() {
   const redirectingRef = useRef(false)
   const [user, setUser] = useState<any>(null)
 
-  // Generation form state (mock)
   const [genRegion, setGenRegion] = useState('afar')
   const [genType, setGenType] = useState('Situation')
-  const [genMonths, setGenMonths] = useState([3]) // months span
+  const [genMonths, setGenMonths] = useState([3])
   const [title, setTitle] = useState('')
 
   useEffect(() => {
@@ -69,7 +68,6 @@ export default function ReportsPage() {
   }, [reports])
 
   function handleGenerate() {
-    // mock handler (would POST to /api/reports)
     console.log('[MOCK] Generate report', { genRegion, genType, genMonths: genMonths[0], title })
     setTitle('')
   }
@@ -83,7 +81,6 @@ export default function ReportsPage() {
           <p className="text-sm text-muted-foreground">Generate analytical & situation reports for decision support. Mock functionality until API integration.</p>
         </div>
 
-        {/* Summary */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Reports</CardTitle><CardDescription>Total available</CardDescription></CardHeader>
@@ -99,7 +96,6 @@ export default function ReportsPage() {
             </Card>
         </div>
 
-        {/* Generation Form */}
         <Card>
           <CardHeader className="pb-4">
             <CardTitle className="text-base">New Report</CardTitle>
@@ -145,7 +141,6 @@ export default function ReportsPage() {
           </CardContent>
         </Card>
 
-        {/* Reports Table */}
         <Card>
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Recent Reports</CardTitle>

@@ -3,11 +3,12 @@
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { loginByEmail, getCurrentUser, listUsers } from "@/lib/auth"
+import { listUsers } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { signIn, useSession } from 'next-auth/react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -15,26 +16,21 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [users, setUsers] = useState(() => listUsers())
   const redirectedRef = useRef(false)
+  const { data: session, status } = useSession()
 
   useEffect(() => {
-    const u = getCurrentUser()
-    if (u && !redirectedRef.current) {
+    if (status === 'loading') return
+    if (session && !redirectedRef.current) {
       redirectedRef.current = true
       router.replace("/")
     }
-  }, [router])
+  }, [router, session, status])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const u = loginByEmail(email.trim())
-    if (!u) {
-      setError("User not found")
-      return
-    }
-    if (!redirectedRef.current) {
-      redirectedRef.current = true
-      router.replace("/")
-    }
+    const res = await signIn('credentials', { email: email.trim(), redirect: false, callbackUrl: '/' })
+    if (res?.error) { setError('Login failed'); return }
+    router.replace('/')
   }
 
   return (

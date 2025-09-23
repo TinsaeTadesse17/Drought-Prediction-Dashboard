@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: deep-dashboard
+    env: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: NEXTAUTH_URL
+        value: https://deep-dashboard.onrender.com
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: PREDICTIONS_API_URL
+        sync: false

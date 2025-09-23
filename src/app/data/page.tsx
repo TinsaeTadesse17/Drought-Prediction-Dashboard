@@ -36,7 +36,6 @@ export default function DataPage() {
   const redirectingRef = useRef(false)
   const [user, setUser] = useState<any>(null)
 
-  // Filters
   const [region, setRegion] = useState<string>('all')
   const [variable, setVariable] = useState<string>('all')
   const [status, setStatus] = useState<string>('all')
@@ -51,7 +50,6 @@ export default function DataPage() {
       }
     } else {
       setUser(u)
-      // Restrict default region if user not admin
       if (u.role !== 'admin') setRegion(u.placeOfInterest.region)
       setChecked(true)
     }
@@ -84,7 +82,6 @@ export default function DataPage() {
           <p className="text-sm text-muted-foreground">Curated drought-related datasets supporting CDI computation, forecasting & situational analysis.</p>
         </div>
 
-        {/* Summary Cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Datasets</CardTitle><CardDescription>Total loaded (filtered)</CardDescription></CardHeader>
@@ -100,7 +97,6 @@ export default function DataPage() {
           </Card>
         </div>
 
-        {/* Filters & Actions */}
         <Card>
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Filters</CardTitle>
@@ -157,7 +153,6 @@ export default function DataPage() {
           </CardContent>
         </Card>
 
-        {/* Data Table */}
         <Card>
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Datasets</CardTitle>

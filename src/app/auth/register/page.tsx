@@ -29,7 +29,7 @@ export default function RegisterPage() {
   }, [router])
 
   useEffect(() => {
-    if (role !== "woreda_officer" && role !== "civilian") setWoreda(undefined)
+    if (role !== "woreda_officer") setWoreda(undefined)
   }, [role])
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -71,7 +71,6 @@ export default function RegisterPage() {
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="regional_officer">Regional Officer</SelectItem>
                   <SelectItem value="woreda_officer">Woreda Officer</SelectItem>
-                  <SelectItem value="civilian">Civilian</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -85,7 +84,7 @@ export default function RegisterPage() {
                 </SelectContent>
               </Select>
             </div>
-            {(role === "woreda_officer" || role === "civilian") && (
+            {role === "woreda_officer" && (
               <div>
                 <label className="text-sm font-medium mb-1 block">Woreda</label>
                 <Select value={woreda} onValueChange={setWoreda}>

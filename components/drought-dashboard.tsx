@@ -21,12 +21,11 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableCaption } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 
-// CDI classification function
-function classifyCDI(cdi: number) {
-  if (cdi <= -1.5) return 'Extreme Drought'
-  if (cdi <= -1) return 'Severe Drought'
-  if (cdi <= -0.5) return 'Moderate Drought'
-  if (cdi <= 0.5) return 'Normal'
+function classifySPEI(spei: number) {
+  if (spei <= -1.5) return 'Extreme Drought'
+  if (spei <= -1) return 'Severe Drought'
+  if (spei <= -0.5) return 'Moderate Drought'
+  if (spei <= 0.5) return 'Normal'
   return 'No Drought'
 }
 
@@ -37,38 +36,28 @@ function phaseFromClass(c: string) {
 }
 
 async function fetchPredictions(region: Region, woreda?: string): Promise<number[]> {
-  // Placeholder for real API call to baseurl/predictions?region=...&woreda=...
-  // Return deterministic mock for stability
-  const seed = (region + (woreda||''))
-  const arr: number[] = []
-  for (let i=0;i<12;i++) {
-    // simple pseudo-random but stable per seed
-    const h = seed.split('').reduce((a,c)=>a+c.charCodeAt(0),0) + i*31
-    const v = ((Math.sin(h)+1)/2)*3 - 1.8 // range approx -1.8 .. +1.2
-    arr.push(Number(v.toFixed(2)))
+  try {
+    const qs = new URLSearchParams()
+    if (region) qs.set('region', region)
+    if (woreda) qs.set('woreda', woreda)
+    const res = await fetch(`/api/predictions?${qs.toString()}`, { cache: 'no-store' })
+    if (!res.ok) throw new Error('predictions api failed')
+    const data = await res.json()
+    const arr: number[] = data.aggregated_prediction
+    if (Array.isArray(arr) && arr.length) return arr
+  } catch (e) {
+    return []
   }
-  return arr
+  return Array(12).fill(0)
 }
 
-// Dataset & Report sample (mock) data
 interface DatasetRow { id: string; name: string; region: string; variable: string; type: string; lastUpdated: string; records: number; status: 'active' | 'processing' | 'archived' }
-const SAMPLE_DATASETS: DatasetRow[] = [
-  { id: 'ds-001', name: 'Historical CDI 2015-2024', region: 'afar', variable: 'CDI', type: 'Historical', lastUpdated: '2025-08-01', records: 1080, status: 'active' },
-  { id: 'ds-002', name: 'Forecast CDI Aug25-Aug26', region: 'somali', variable: 'CDI', type: 'Forecast', lastUpdated: '2025-08-15', records: 360, status: 'active' },
-  { id: 'ds-003', name: 'Rainfall Observations 2025', region: 'afar', variable: 'Rainfall', type: 'Ingest', lastUpdated: '2025-08-18', records: 240, status: 'processing' },
-  { id: 'ds-004', name: 'Vegetation Index (NDVI)', region: 'somali', variable: 'NDVI', type: 'Remote Sensing', lastUpdated: '2025-08-10', records: 520, status: 'active' },
-  { id: 'ds-005', name: 'Soil Moisture (Surface)', region: 'afar', variable: 'Soil Moisture', type: 'Remote Sensing', lastUpdated: '2025-08-12', records: 520, status: 'archived' },
-]
+const SAMPLE_DATASETS: DatasetRow[] = []
 interface ReportRow { id: string; title: string; region: string; period: string; type: string; created: string; status: 'ready' | 'generating' | 'failed'; sizeKB: number }
-const SAMPLE_REPORTS: ReportRow[] = [
-  { id: 'r-101', title: 'Afar Monthly Situation - Jul 2025', region: 'afar', period: 'Jul 2025', type: 'Situation', created: '2025-08-01', status: 'ready', sizeKB: 412 },
-  { id: 'r-102', title: 'Somali Forecast Outlook (Q4 2025)', region: 'somali', period: 'Q4 2025', type: 'Forecast', created: '2025-08-12', status: 'ready', sizeKB: 655 },
-  { id: 'r-103', title: 'Afar Rainfall Anomaly Snapshot', region: 'afar', period: 'Aug 2025', type: 'Rainfall', created: '2025-08-16', status: 'generating', sizeKB: 0 },
-]
+const SAMPLE_REPORTS: ReportRow[] = []
 
 export function DroughtDashboard() {
   const [activeTab, setActiveTab] = useState("Dashboard")
-  // Region & woreda default; will sync with logged-in user when available
   const [selectedRegion, setSelectedRegion] = useState<Region>("afar")
   const [selectedWoreda, setSelectedWoreda] = useState<string | undefined>(undefined)
   const [yearMonth, setYearMonth] = useState([0])
@@ -80,25 +69,39 @@ export function DroughtDashboard() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const router = useRouter()
   const [predictions, setPredictions] = useState<number[]>(Array(12).fill(0))
-  // Data tab filters/state
+  const [datasets, setDatasets] = useState<DatasetRow[]>(SAMPLE_DATASETS)
+  const [reports, setReports] = useState<ReportRow[]>(SAMPLE_REPORTS)
   const [dataRegion, setDataRegion] = useState('all')
   const [dataVariable, setDataVariable] = useState('all')
   const [dataStatus, setDataStatus] = useState('all')
   const [dataSearch, setDataSearch] = useState('')
-  // Reports tab state
   const [genRegion, setGenRegion] = useState('afar')
   const [genType, setGenType] = useState('Situation')
   const [genMonths, setGenMonths] = useState([3])
   const [reportTitle, setReportTitle] = useState('')
-  
-  // Comparison state (new)
-  const [compareMode, setCompareMode] = useState<'regions'|'woredas'>('regions') // admin only toggle
-  const [compareRegion, setCompareRegion] = useState<Region>('afar') // region for woreda comparison
-  const [regionPredictions, setRegionPredictions] = useState<Record<Region, number[]>>({ afar: Array(12).fill(0), somali: Array(12).fill(0) })
+
+  const [compareMode, setCompareMode] = useState<'regions'|'woredas'>('regions')
+  const [compareRegion, setCompareRegion] = useState<Region>('afar')
   const [woredaPredictions, setWoredaPredictions] = useState<Record<string, number[]>>({})
+  const regionPredictions = useMemo<Record<Region, number[]>>(() => {
+    const makeAvg = (reg: Region): number[] => {
+      const ws = REGION_WOREDAS[reg]
+      const arrays = ws.map(w => woredaPredictions[w]).filter(a => Array.isArray(a) && a.length > 0) as number[][]
+      if (arrays.length === 0) return []
+      const len = 12
+      const out: number[] = []
+      for (let i=0;i<len;i++) {
+        const vals = arrays.map(a => a[i]).filter(v => typeof v === 'number' && Number.isFinite(v)) as number[]
+        if (vals.length === 0) { out.push(NaN); continue }
+        const avg = vals.reduce((a,b)=>a+b,0) / vals.length
+        out.push(avg)
+      }
+      return out
+    }
+    return { afar: makeAvg('afar'), somali: makeAvg('somali') }
+  }, [woredaPredictions])
   const [comparisonLoading, setComparisonLoading] = useState(false)
 
-  // Load current user on mount (ensures sync with storage changes)
   useEffect(() => {
     const u = getCurrentUser()
     if (u) {
@@ -109,12 +112,31 @@ export function DroughtDashboard() {
   }, [])
 
   useEffect(() => {
+    if (!selectedWoreda) { setPredictions([]); return }
     fetchPredictions(selectedRegion, selectedWoreda).then(setPredictions)
   }, [selectedRegion, selectedWoreda])
 
-  // Year slider: Aug 2025 (0) -> Aug 2026 (12)
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const ds = await fetch('/api/datasets', { cache: 'no-store' })
+        if (ds.ok) setDatasets(await ds.json())
+      } catch {}
+      try {
+        const rs = await fetch('/api/reports', { cache: 'no-store' })
+        if (rs.ok) setReports(await rs.json())
+      } catch {}
+    }
+    load()
+  }, [])
+
   const MIN_DATE_LABEL = "Aug 2025"
-  const MAX_DATE_LABEL = "Aug 2026"
+  const END_DATE_LABEL = useMemo(() => {
+    const start = new Date("2025-08-01T00:00:00Z")
+    const d = new Date(start)
+    d.setUTCMonth(start.getUTCMonth() + 11)
+    return d.toLocaleString("en-US", { month: "short", year: "numeric" })
+  }, [])
   const currentLabel = useMemo(() => {
     const start = new Date("2025-08-01T00:00:00Z")
     const d = new Date(start)
@@ -122,25 +144,20 @@ export function DroughtDashboard() {
     return d.toLocaleString("en-US", { month: "short", year: "numeric" })
   }, [yearMonth])
 
-  // Accuracy decays per month from start
   const ACCURACY_DECAY_PER_MONTH = 5
   const accuracy = Math.max(0, Math.min(100, 100 - yearMonth[0] * ACCURACY_DECAY_PER_MONTH))
 
-  // Role-based: limit region options to user's allowed regions (Afar/Somali only)
   const allowedRegions: Region[] = user?.allowedRegions ?? ["afar", "somali"]
 
-  // Allowed woredas depend on role
   const allowedWoredasForRegion = useMemo(() => {
     if (!user) return REGION_WOREDAS[selectedRegion]
     if (user.role === "woreda_officer") {
       const w = user.placeOfInterest.woreda
       return w && REGION_WOREDAS[selectedRegion].includes(w) ? [w] : []
     }
-    // admin and regional_officer can view all woredas in the selected region
     return REGION_WOREDAS[selectedRegion]
   }, [user, selectedRegion])
 
-  // Ensure woreda validity on region change based on role
   const ensureWoreda = (reg: Region, w?: string) => {
     if (!w) {
       if (user?.role === "woreda_officer") {
@@ -149,7 +166,6 @@ export function DroughtDashboard() {
       }
       return undefined
     }
-    // If user is woreda_officer, force their woreda
     if (user?.role === "woreda_officer") {
       const uw = user.placeOfInterest.woreda
       return uw && REGION_WOREDAS[reg].includes(uw) ? uw : undefined
@@ -157,7 +173,6 @@ export function DroughtDashboard() {
     return REGION_WOREDAS[reg].includes(w) ? w : undefined
   }
 
-  // Translation fetch (title only currently)
   useEffect(() => {
     const run = async () => {
       try {
@@ -170,17 +185,16 @@ export function DroughtDashboard() {
     run()
   }, [lang])
 
-  // Email alert mock when classification escalates
   const monthIndex = yearMonth[0]
-  const currentCDI = predictions[monthIndex] ?? 0
-  const currentClass = classifyCDI(currentCDI)
-  const currentPhase = phaseFromClass(currentClass)
+  const currentSPEI = predictions[monthIndex]
+  const hasCurrent = typeof currentSPEI === 'number' && Number.isFinite(currentSPEI)
+  const currentClass = hasCurrent ? classifySPEI(currentSPEI as number) : 'No Data'
+  const currentPhase = hasCurrent ? phaseFromClass(currentClass) : '—'
   useEffect(() => {
     if (currentPhase === 'Warn' || currentPhase === 'Alert') {
-      // mock email send
-      console.log("[MOCK] Sending email alert:", { user: user?.email, region: selectedRegion, woreda: selectedWoreda, phase: currentPhase, cdi: currentCDI })
+      console.log("[MOCK] Sending email alert:", { user: user?.email, region: selectedRegion, woreda: selectedWoreda, phase: currentPhase, spei: currentSPEI })
     }
-  }, [currentPhase, currentCDI, selectedRegion, selectedWoreda, user])
+  }, [currentPhase, currentSPEI, selectedRegion, selectedWoreda, user])
 
   useEffect(()=>{ if (session) { const sessRegion = (session as any).region || 'afar'; const sessWoreda = (session as any).woreda; setUser({ role: (session as any).role||'admin', allowedRegions: (session as any).role==='admin'?['afar','somali']:[sessRegion], placeOfInterest: { region: sessRegion, woreda: sessWoreda } }); setSelectedRegion(sessRegion); setSelectedWoreda(sessWoreda); } }, [session])
 
@@ -192,18 +206,15 @@ export function DroughtDashboard() {
     router.replace('/auth/login')
   }
 
-  // Responsive nav items
   const NAV_ITEMS = ["Dashboard", "Data", "Reports", "Help"] as const
 
   const regionInitRef = (typeof window !== 'undefined') ? (window as any)._regionInitRef ?? { current: false } : { current: false }
   useEffect(()=>{ if (!(regionInitRef as any).current && selectedRegion) { (regionInitRef as any).current = true } }, [selectedRegion])
 
-  // Adjust default dataRegion when user loads
   useEffect(()=>{ if(user && user.role !== 'admin') { setDataRegion(user.placeOfInterest.region) ; setGenRegion(user.placeOfInterest.region) } },[user])
 
-  // Derived Data tab values
   const filteredDatasets = useMemo(()=>{
-    return SAMPLE_DATASETS.filter(d=>{
+    return datasets.filter(d=>{
       if (user && user.role !== 'admin' && d.region !== user.placeOfInterest.region) return false
       if (dataRegion !== 'all' && d.region !== dataRegion) return false
       if (dataVariable !== 'all' && d.variable !== dataVariable) return false
@@ -220,9 +231,8 @@ export function DroughtDashboard() {
     return { total, recs, processing }
   }, [filteredDatasets])
 
-  // Reports derived
   const visibleReports = useMemo(()=>{
-    return SAMPLE_REPORTS.filter(r=>{ if(user && user.role!=='admin' && r.region!==user.placeOfInterest.region) return false; return true })
+    return reports.filter(r=>{ if(user && user.role!=='admin' && r.region!==user.placeOfInterest.region) return false; return true })
   },[user])
   const reportSummary = useMemo(()=>{
     const total = visibleReports.length
@@ -237,22 +247,27 @@ export function DroughtDashboard() {
   }
 
   useEffect(() => {
-    // Preload region-level predictions for admin comparison (and for regional to show baseline if desired)
-    const load = async () => {
-      if (!user) return
-      if (user.role === 'woreda_officer') return
+    const loadAll = async () => {
+      if (!user || user.role !== 'admin' || compareMode !== 'regions') return
       setComparisonLoading(true)
       try {
-        const afarP = await fetchPredictions('afar')
-        const somaliP = await fetchPredictions('somali')
-        setRegionPredictions({ afar: afarP, somali: somaliP })
+        const regions: Region[] = ['afar', 'somali']
+        for (const reg of regions) {
+          const woredas = REGION_WOREDAS[reg]
+          const entries: [string, number[]][] = []
+          for (const w of woredas) {
+            if (woredaPredictions[w]) continue
+            const preds = await fetchPredictions(reg, w)
+            entries.push([w, preds])
+          }
+          if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
+        }
       } finally { setComparisonLoading(false) }
     }
-    load()
-  }, [user])
+    loadAll()
+  }, [user, compareMode])
 
   useEffect(() => {
-    // Load woreda predictions for selected compareRegion when needed
     const loadWoredas = async () => {
       if (!user) return
       const needWoredaComparison = (user.role === 'regional_officer') || (user.role === 'admin' && compareMode === 'woredas')
@@ -262,7 +277,6 @@ export function DroughtDashboard() {
         const woredas = REGION_WOREDAS[compareRegion]
         const entries: [string, number[]][] = []
         for (const w of woredas) {
-          // Avoid refetch if already present
             if (woredaPredictions[w]) { continue }
             const preds = await fetchPredictions(compareRegion, w)
             entries.push([w, preds])
@@ -274,6 +288,28 @@ export function DroughtDashboard() {
     }
     loadWoredas()
   }, [user, compareMode, compareRegion, woredaPredictions])
+
+  useEffect(() => {
+    if (!selectedWoreda && allowedWoredasForRegion.length > 0) {
+      const candidate = allowedWoredasForRegion[0]
+      setSelectedWoreda(ensureWoreda(selectedRegion, candidate))
+    }
+  }, [selectedRegion, allowedWoredasForRegion, selectedWoreda])
+
+  useEffect(() => {
+    const loadRegionWoredas = async () => {
+      if (!selectedRegion) return
+      const woredas = REGION_WOREDAS[selectedRegion]
+      const entries: [string, number[]][] = []
+      for (const w of woredas) {
+        if (woredaPredictions[w]) continue
+        const preds = await fetchPredictions(selectedRegion, w)
+        entries.push([w, preds])
+      }
+      if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
+    }
+    loadRegionWoredas()
+  }, [selectedRegion])
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -332,23 +368,21 @@ export function DroughtDashboard() {
       </header>
 
       <div className="flex flex-1 flex-col">
-        {/* Removed separate sticky aside; integrate sidebar content next to map */}
         <main className="flex-1 p-4 md:p-6 space-y-6">
           {activeTab === "Dashboard" && (
             <div className="space-y-6">
               <div>
                 <h1 className="text-2xl font-bold mb-1">{translatedTitle ?? "Drought Early Warning System"}</h1>
-                <p className="text-muted-foreground text-sm md:text-base">Interactive drought monitoring with role-based geographic visibility and CDI predictions.</p>
+                <p className="text-muted-foreground text-sm md:text-base">Interactive drought monitoring with role-based geographic visibility and SPEI predictions.</p>
               </div>
 
-              {/* Map + Sidebar side-by-side on desktop */}
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/2">
-                  <DroughtMap region={selectedRegion} woreda={selectedWoreda} monthIndex={monthIndex} predictions={predictions} disableInteraction={accountOpen} />
+                  <DroughtMap region={selectedRegion} woreda={selectedWoreda} monthIndex={monthIndex} predictions={predictions} disableInteraction={accountOpen} predictionsByWoreda={Object.fromEntries((REGION_WOREDAS[selectedRegion]||[]).map(w=>[w, woredaPredictions[w]||[]]))} onSelectWoreda={setSelectedWoreda} />
                   <div className="mt-4 bg-card border rounded p-4">
                     <div className="flex justify-between items-center mb-2 text-sm"><span>Forecast Month</span><Badge variant="secondary">{currentLabel}</Badge></div>
-                    <Slider value={yearMonth} onValueChange={setYearMonth} max={12} min={0} step={1} className="w-full" />
-                    <div className="flex justify-between text-[10px] text-muted-foreground mt-1"><span>{MIN_DATE_LABEL}</span><span>{MAX_DATE_LABEL}</span></div>
+                    <Slider value={yearMonth} onValueChange={setYearMonth} max={11} min={0} step={1} className="w-full" />
+                    <div className="flex justify-between text-[10px] text-muted-foreground mt-1"><span>{MIN_DATE_LABEL}</span><span>{END_DATE_LABEL}</span></div>
                   </div>
                 </div>
                 <div className="w-full md:w-1/2 space-y-4">
@@ -373,26 +407,25 @@ export function DroughtDashboard() {
                     </div>
                     <div className="p-3 rounded border bg-background text-xs space-y-1">
                       <div className="flex justify-between"><span>Month</span><span>{currentLabel}</span></div>
-                      <div className="flex justify-between"><span>CDI</span><span>{currentCDI?.toFixed(2)}</span></div>
+                      <div className="flex justify-between"><span>SPEI</span><span>{hasCurrent ? (currentSPEI as number).toFixed(2) : '—'}</span></div>
                       <div className="flex justify-between"><span>Class</span><span>{currentClass}</span></div>
                       <div className={`flex justify-between ${currentPhase==='Alert'?'text-red-600':currentPhase==='Warn'?'text-orange-600':'text-green-600'}`}><span>Phase</span><span>{currentPhase}</span></div>
                     </div>
+                    {!hasCurrent && <div className="text-[11px] text-muted-foreground">No data yet. Select a woreda or try another month.</div>}
                     <div className="text-xs text-muted-foreground">Email alerts auto-send (mock) when phase is Warn or Alert.</div>
                   </div>
                 </div>
               </div>
 
-              {/* Key Metrics (responsive stacking) */}
               <div>
                 <h2 className="text-lg font-semibold mb-3">Key Metrics</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Current CDI</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{currentCDI.toFixed(2)}</div></CardContent></Card>
+                  <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Current SPEI</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{hasCurrent ? (currentSPEI as number).toFixed(2) : '—'}</div></CardContent></Card>
                   <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Classification</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{currentClass}</div></CardContent></Card>
                   <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Phase</CardTitle></CardHeader><CardContent><div className={`text-2xl font-bold ${currentPhase==='Alert'?'text-red-600':currentPhase==='Warn'?'text-orange-600':'text-green-600'}`}>{currentPhase}</div></CardContent></Card>
                 </div>
               </div>
 
-              {/* Role-based Comparison Section */}
               {user && user.role !== 'woreda_officer' && (
                 <Card>
                   <CardHeader>
@@ -420,7 +453,7 @@ export function DroughtDashboard() {
                       </div>
                     </CardTitle>
                     <CardDescription>
-                      {comparisonLoading ? 'Loading comparison...' : user.role === 'admin' && compareMode==='regions' ? 'Region-level current month CDI & phase.' : 'Woreda-level current month CDI & phase.'}
+                      {comparisonLoading ? 'Loading comparison...' : user.role === 'admin' && compareMode==='regions' ? 'Region-level current month SPEI & phase.' : 'Woreda-level current month SPEI & phase.'}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -430,7 +463,7 @@ export function DroughtDashboard() {
                           <thead className="text-xs text-muted-foreground uppercase">
                             <tr>
                               <th className="text-left font-medium py-1">Region</th>
-                              <th className="text-left font-medium py-1">CDI</th>
+                              <th className="text-left font-medium py-1">SPEI</th>
                               <th className="text-left font-medium py-1">Class</th>
                               <th className="text-left font-medium py-1">Phase</th>
                             </tr>
@@ -438,13 +471,14 @@ export function DroughtDashboard() {
                           <tbody>
                             {(['afar','somali'] as Region[]).map(r => {
                               const preds = regionPredictions[r] || []
-                              const val = preds[monthIndex] ?? 0
-                              const cls = classifyCDI(val)
+                              const val = preds[monthIndex]
+                              const hasVal = typeof val === 'number' && Number.isFinite(val)
+                              const cls = hasVal ? classifySPEI(val as number) : 'No Data'
                               const ph = phaseFromClass(cls)
                               return (
                                 <tr key={r} className="border-t">
                                   <td className="py-1 capitalize font-medium">{r}</td>
-                                  <td className="py-1 tabular-nums">{val.toFixed(2)}</td>
+                                  <td className="py-1 tabular-nums">{hasVal ? (val as number).toFixed(2) : '—'}</td>
                                   <td className="py-1">{cls}</td>
                                   <td className={`py-1 ${ph==='Alert'?'text-red-600':ph==='Warn'?'text-orange-600':'text-green-600'}`}>{ph}</td>
                                 </tr>
@@ -460,7 +494,7 @@ export function DroughtDashboard() {
                           <thead className="text-xs text-muted-foreground uppercase">
                             <tr>
                               <th className="text-left font-medium py-1">Woreda</th>
-                              <th className="text-left font-medium py-1">CDI</th>
+                              <th className="text-left font-medium py-1">SPEI</th>
                               <th className="text-left font-medium py-1">Class</th>
                               <th className="text-left font-medium py-1">Phase</th>
                             </tr>
@@ -468,13 +502,14 @@ export function DroughtDashboard() {
                           <tbody>
                             {REGION_WOREDAS[(user.role==='regional_officer'? user.placeOfInterest.region : compareRegion) as Region].map(w => {
                               const preds = woredaPredictions[w] || []
-                              const val = preds[monthIndex] ?? 0
-                              const cls = classifyCDI(val)
+                              const val = preds[monthIndex]
+                              const hasVal = typeof val === 'number' && Number.isFinite(val)
+                              const cls = hasVal ? classifySPEI(val as number) : 'No Data'
                               const ph = phaseFromClass(cls)
                               return (
                                 <tr key={w} className="border-t">
                                   <td className="py-1 font-medium">{w}</td>
-                                  <td className="py-1 tabular-nums">{val.toFixed(2)}</td>
+                                  <td className="py-1 tabular-nums">{hasVal ? (val as number).toFixed(2) : '—'}</td>
                                   <td className="py-1">{cls}</td>
                                   <td className={`py-1 ${ph==='Alert'?'text-red-600':ph==='Warn'?'text-orange-600':'text-green-600'}`}>{ph}</td>
                                 </tr>
@@ -482,17 +517,12 @@ export function DroughtDashboard() {
                             })}
                           </tbody>
                         </table>
-                        <p className="mt-2 text-[10px] text-muted-foreground">Values are mock predictions; real API will replace.</p>
+                        <p className="mt-2 text-[10px] text-muted-foreground">Values are fetched from the external model API.</p>
                       </div>
                     )}
                   </CardContent>
                 </Card>
               )}
-              {/* Regional Comparison placeholder kept (can be role-dynamic later) */}
-              {/* <Card>
-                <CardHeader><CardTitle>Regional Comparison (Placeholder)</CardTitle></CardHeader>
-                <CardContent><div className="text-sm text-muted-foreground mb-2">Future role-based comparative analytics.</div><Progress value={60} /></CardContent>
-              </Card> */}
               <footer className="text-center text-xs text-muted-foreground mt-4">
                 <p><a className="underline" href="https://t.me/" target="_blank" rel="noopener noreferrer">Telegram Bot</a></p>
                 <p>© 2025 Drought Early Warning System</p>
@@ -504,7 +534,7 @@ export function DroughtDashboard() {
             <div className="space-y-10">
               <div className="flex flex-col gap-2">
                 <h1 className="text-3xl font-bold tracking-tight">Data</h1>
-                <p className="text-sm text-muted-foreground">Curated drought-related datasets supporting CDI computation & forecasting.</p>
+                <p className="text-sm text-muted-foreground">Curated drought-related datasets supporting SPEI computation & forecasting.</p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Datasets</CardTitle><CardDescription>Filtered count</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{dataSummary.total}</CardContent></Card>
@@ -532,7 +562,7 @@ export function DroughtDashboard() {
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="CDI">CDI</SelectItem>
+                          <SelectItem value="SPEI">SPEI</SelectItem>
                           <SelectItem value="Rainfall">Rainfall</SelectItem>
                           <SelectItem value="NDVI">NDVI</SelectItem>
                           <SelectItem value="Soil Moisture">Soil Moisture</SelectItem>
@@ -697,7 +727,7 @@ export function DroughtDashboard() {
                     <div><span className="font-semibold">1.</span> Pick Region / Woreda (if permitted)</div>
                     <div><span className="font-semibold">2.</span> Move the month slider</div>
                     <div><span className="font-semibold">3.</span> Click a woreda polygon on the map</div>
-                    <div><span className="font-semibold">4.</span> Review CDI & phase</div>
+                    <div><span className="font-semibold">4.</span> Review SPEI & phase</div>
                     <div><span className="font-semibold">5.</span> Change theme / language if needed</div>
                   </CardContent>
                 </Card>
@@ -727,10 +757,10 @@ export function DroughtDashboard() {
                     <p>If the map appears blank, ensure your role has a region assigned. The system defaults to Afar; selecting a region re-fetches the GeoJSON.</p>
                   </AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="cdi">
-                  <AccordionTrigger className="text-sm">CDI & Forecast Slider</AccordionTrigger>
+                <AccordionItem value="spei">
+                  <AccordionTrigger className="text-sm">SPEI & Forecast Slider</AccordionTrigger>
                   <AccordionContent className="text-sm space-y-2">
-                    <p>The slider spans 12 forecast months (Aug 2025 – Aug 2026). CDI (Composite Drought Index) values update for the selected month. Accuracy conceptually decays over time (placeholder logic now).</p>
+                    <p>The slider spans 12 forecast months (Aug 2025 – Aug 2026). SPEI (Standardized Precipitation–Evapotranspiration Index) values update for the selected month. Accuracy conceptually decays over time (placeholder logic now).</p>
                   </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="alerts">

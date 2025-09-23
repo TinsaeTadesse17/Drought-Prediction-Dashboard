@@ -27,7 +27,6 @@ export async function POST(req: Request) {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
-      // Ensure server-side fetch
       cache: "no-store",
     })
 
