@@ -29,7 +29,19 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
   const [ready, setReady] = useState(false)
   const [mapReady, setMapReady] = useState(false)
 
-  const normalizeWoredaName = (name?: string) => (name || '').trim()
+  // Normalize woreda names so variations like "Godey" vs "Godey Woreda" match.
+  // We remove a trailing word 'woreda' (case-insensitive) and collapse excess spaces.
+  const normalizeWoredaName = (name?: string) => {
+    if (!name) return ''
+    let out = name
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/\bWoreda\b$/i, '')
+      .trim()
+    // Alias corrections
+    if (/^gode$/i.test(out)) out = 'Godey'
+    return out
+  }
 
   const CLASS_COLORS = {
     extreme: '#dc2626',
@@ -160,15 +172,16 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
 
       const layer = L.geoJSON(data, {
         style: (feature: any): PathOptions => {
-          const featName = normalizeWoredaName(feature.properties?.ADM3_EN)
+          const rawName = feature.properties?.name || feature.properties?.ADM3_EN
+          const featName = normalizeWoredaName(rawName)
           const spei = (predictionsByWoreda[featName]?.[monthIndex]) ?? undefined
           const cls = classify(typeof spei === 'number' ? spei : 999)
-          const isSelected = normalizeWoredaName(feature.properties?.ADM3_EN||'').toLowerCase() === normalizeWoredaName(woreda||'').toLowerCase()
+          const isSelected = normalizeWoredaName(rawName||'').toLowerCase() === normalizeWoredaName(woreda||'').toLowerCase()
           const baseColor = cls === 'Extreme Drought' ? CLASS_COLORS.extreme : cls === 'Severe Drought' ? CLASS_COLORS.severe : cls === 'Moderate Drought' ? CLASS_COLORS.moderate : cls === 'Normal' ? CLASS_COLORS.normal : CLASS_COLORS.nodrought
           return { color: baseColor, weight: isSelected ? 3 : 1, fillColor: baseColor, fillOpacity: isSelected ? 0.65 : 0.4 }
         },
         onEachFeature: (feature, lyr) => {
-          const name = normalizeWoredaName(feature.properties?.ADM3_EN || 'Unknown')
+          const name = normalizeWoredaName(feature.properties?.name || feature.properties?.ADM3_EN || 'Unknown')
           const spei = (predictionsByWoreda[name]?.[monthIndex]) ?? undefined
           const cls = classify(typeof spei === 'number' ? spei : 999)
           const phase = phaseOf(cls)
@@ -191,14 +204,16 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         layer.bringToFront()
         if (woreda) {
           regionLayerRef.current.eachLayer((l: any) => {
-            const n = normalizeWoredaName(l.feature?.properties?.ADM3_EN||'').toLowerCase()
+            const raw = l.feature?.properties?.name || l.feature?.properties?.ADM3_EN || ''
+            const n = normalizeWoredaName(raw).toLowerCase()
             const sel = n === normalizeWoredaName(woreda).toLowerCase()
             l.setStyle({ fillOpacity: sel ? 0.65 : 0.05, opacity: sel ? 1 : 0.3 })
           })
         }
         if (woreda) {
           regionLayerRef.current.eachLayer((l: any) => {
-            if (normalizeWoredaName(l.feature?.properties?.ADM3_EN||'').toLowerCase() === normalizeWoredaName(woreda).toLowerCase() && l.getBounds) {
+            const raw = l.feature?.properties?.name || l.feature?.properties?.ADM3_EN || ''
+            if (normalizeWoredaName(raw).toLowerCase() === normalizeWoredaName(woreda).toLowerCase() && l.getBounds) {
               mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
             }
           })
@@ -237,12 +252,13 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       if (!w) return
       try {
         regionLayerRef.current.eachLayer((l: any) => {
-          const n = normalizeWoredaName(l.feature?.properties?.ADM3_EN || "").toLowerCase()
-          const match = n === normalizeWoredaName(w).toLowerCase()
-          l.setStyle({ weight: match ? 3 : 1, fillOpacity: match ? 0.7 : 0.35 })
-          if (match && l.getBounds) {
-            mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
-          }
+          const raw = l.feature?.properties?.name || l.feature?.properties?.ADM3_EN || ''
+            const n = normalizeWoredaName(raw).toLowerCase()
+            const match = n === normalizeWoredaName(w).toLowerCase()
+            l.setStyle({ weight: match ? 3 : 1, fillOpacity: match ? 0.7 : 0.35 })
+            if (match && l.getBounds) {
+              mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
+            }
         })
       } catch {}
     }
