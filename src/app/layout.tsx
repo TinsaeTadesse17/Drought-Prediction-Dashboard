@@ -10,10 +10,12 @@ export const metadata: Metadata = {
   title: "Drought Early Warning System",
   description: "Disaster Risk Management Dashboard",
   generator: "v0.dev",
+  icons: {
+    icon: "/favicon.ico"
+  }
 }
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+// Removed force-dynamic & revalidate=0 to allow Next.js to optimize static shell where possible.
 
 export default function RootLayout({
   children,

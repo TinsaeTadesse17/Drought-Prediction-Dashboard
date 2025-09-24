@@ -1,20 +1,14 @@
-import type { Config } from 'tailwindcss'
-
-// Explicit Tailwind config to ensure production build does not purge everything
-// Tailwind v4 uses the new @tailwindcss/postcss plugin; content globs still help
-// in some CI/build environments where automatic content detection may fail.
-const config: Config = {
+/** JS fallback Tailwind config in case the build environment ignores tailwind.config.ts */
+/** @type {import('tailwindcss').Config} */
+module.exports = {
   content: [
-    './src/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-    './lib/**/*.{js,ts,jsx,tsx,mdx}',
-    './hooks/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/**/*.{js,ts,jsx,tsx}',
+    './components/**/*.{js,ts,jsx,tsx}',
+    './app/**/*.{js,ts,jsx,tsx}',
   ],
   darkMode: 'class',
   theme: {
     extend: {
-      // We rely mainly on CSS variables defined in globals.css
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
@@ -45,5 +39,3 @@ const config: Config = {
   },
   plugins: []
 }
-
-export default config
