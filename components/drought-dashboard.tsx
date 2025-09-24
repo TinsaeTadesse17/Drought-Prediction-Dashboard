@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/progress"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { User as UserIcon, Bell, Settings, Menu } from "lucide-react"
+import { User as UserIcon, Menu } from "lucide-react"
 import { DroughtMap } from "@/components/drought-map"
 import type { Region } from "@/lib/regions"
 import { REGION_WOREDAS } from "@/lib/regions"
@@ -290,11 +290,23 @@ export function DroughtDashboard() {
   }, [user, compareMode, compareRegion, woredaPredictions])
 
   useEffect(() => {
-    if (!selectedWoreda && allowedWoredasForRegion.length > 0) {
-      const candidate = allowedWoredasForRegion[0]
-      setSelectedWoreda(ensureWoreda(selectedRegion, candidate))
-    }
-  }, [selectedRegion, allowedWoredasForRegion, selectedWoreda])
+      // Robust auto-selection for woreda restrictions
+      if (allowedWoredasForRegion.length === 1) {
+        const only = allowedWoredasForRegion[0]
+        if (selectedWoreda !== only) {
+          setSelectedWoreda(ensureWoreda(selectedRegion, only))
+          return
+        }
+      }
+      if (!selectedWoreda && allowedWoredasForRegion.length > 0) {
+        setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
+        return
+      }
+      if (selectedWoreda && !allowedWoredasForRegion.includes(selectedWoreda)) {
+        if (allowedWoredasForRegion.length > 0) setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
+        else setSelectedWoreda(undefined)
+      }
+    }, [selectedRegion, allowedWoredasForRegion, selectedWoreda])
 
   useEffect(() => {
     const loadRegionWoredas = async () => {
@@ -313,7 +325,8 @@ export function DroughtDashboard() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b bg-card sticky top-0 z-30">
+      {/* Elevated z-index so the navbar stays above Leaflet panes (tile=200..control=800) */}
+      <header className="border-b bg-card sticky top-0 z-[1000] shadow-sm">
         <div className="flex items-center justify-between px-4 md:px-6 py-3">
           <div className="flex items-center gap-3">
             <button className="md:hidden p-2 rounded hover:bg-accent" onClick={()=>setMobileNavOpen(o=>!o)} aria-label="Menu"><Menu className="h-5 w-5" /></button>
@@ -337,8 +350,7 @@ export function DroughtDashboard() {
                 <SelectItem value="aa">Afar</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="ghost" size="icon"><Bell className="h-4 w-4" /></Button>
-            <Button variant="ghost" size="icon"><Settings className="h-4 w-4" /></Button>
+            {/* Removed Bell (notifications) and Settings icons for cleaner navbar */}
             <DropdownMenu open={accountOpen} onOpenChange={setAccountOpen}>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" aria-label="Account"><UserIcon className="h-4 w-4" /></Button>
@@ -378,7 +390,16 @@ export function DroughtDashboard() {
 
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/2">
-                  <DroughtMap region={selectedRegion} woreda={selectedWoreda} monthIndex={monthIndex} predictions={predictions} disableInteraction={accountOpen} predictionsByWoreda={Object.fromEntries((REGION_WOREDAS[selectedRegion]||[]).map(w=>[w, woredaPredictions[w]||[]]))} onSelectWoreda={setSelectedWoreda} />
+                  <DroughtMap
+                    region={selectedRegion}
+                    woreda={selectedWoreda}
+                    monthIndex={yearMonth[0]}
+                    predictions={predictions}
+                    disableInteraction={accountOpen}
+                    predictionsByWoreda={Object.fromEntries((REGION_WOREDAS[selectedRegion]||[]).map(w=>[w, woredaPredictions[w]||[]]))}
+                    allowedWoredas={allowedWoredasForRegion}
+                    onSelectWoreda={setSelectedWoreda}
+                  />
                   <div className="mt-4 bg-card border rounded p-4">
                     <div className="flex justify-between items-center mb-2 text-sm"><span>Forecast Month</span><Badge variant="secondary">{currentLabel}</Badge></div>
                     <Slider value={yearMonth} onValueChange={setYearMonth} max={11} min={0} step={1} className="w-full" />
@@ -412,7 +433,7 @@ export function DroughtDashboard() {
                       <div className={`flex justify-between ${currentPhase==='Alert'?'text-red-600':currentPhase==='Warn'?'text-orange-600':'text-green-600'}`}><span>Phase</span><span>{currentPhase}</span></div>
                     </div>
                     {!hasCurrent && <div className="text-[11px] text-muted-foreground">No data yet. Select a woreda or try another month.</div>}
-                    <div className="text-xs text-muted-foreground">Email alerts auto-send (mock) when phase is Warn or Alert.</div>
+                    
                   </div>
                 </div>
               </div>
@@ -715,7 +736,7 @@ export function DroughtDashboard() {
           )}
 
           {activeTab === "Help" && (
-            <div className="space-y-6 max-w-4xl">
+            <div className="space-y-6 w-full">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-2">Help & Usage</h1>
                 <p className="text-sm text-muted-foreground">Guidance for using the Drought Early Warning Dashboard effectively.</p>

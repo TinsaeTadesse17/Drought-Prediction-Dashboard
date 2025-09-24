@@ -13,9 +13,10 @@ type Props = {
   monthIndex?: number
   predictions?: number[]
   predictionsByWoreda?: Record<string, number[]>
+  allowedWoredas?: string[]
 }
 
-export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {} }: Props) {
+export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas }: Props) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<LeafletMap | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
@@ -28,11 +29,7 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
   const [ready, setReady] = useState(false)
   const [mapReady, setMapReady] = useState(false)
 
-  const normalizeWoredaName = (name?: string) => {
-    const n = (name || '').trim()
-    if (n.toLowerCase() === 'gode') return 'Godey'
-    return n
-  }
+  const normalizeWoredaName = (name?: string) => (name || '').trim()
 
   const CLASS_COLORS = {
     extreme: '#dc2626',
@@ -221,7 +218,9 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       const listEl = document.getElementById("legend-woreda-list")
       if (listEl) {
         listEl.innerHTML = ""
-        REGION_WOREDAS[region].forEach(w => {
+        const all = REGION_WOREDAS[region]
+        const list = allowedWoredas && allowedWoredas.length > 0 ? all.filter(w=>allowedWoredas.includes(w)) : all
+        list.forEach(w => {
           const div = document.createElement("div")
             div.textContent = w
             div.className = `cursor-pointer rounded px-1 py-0.5 ${w === woreda ? 'bg-blue-600 text-white' : 'hover:bg-blue-100 dark:hover:bg-gray-700'}`
@@ -249,7 +248,7 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     }
 
     loadRegionGeo()
-  }, [region, woreda, onSelectWoreda, monthIndex, predictions, mapReady])
+  }, [region, woreda, onSelectWoreda, monthIndex, predictions, mapReady, allowedWoredas])
 
   useEffect(() => {
     if (!region && !mapInstance.current) {

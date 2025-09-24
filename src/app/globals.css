@@ -188,6 +188,11 @@
   font-family: inherit;
 }
 
+/* Keep Leaflet controls (legend, zoom, attribution) beneath the sticky navbar (z-[1000]) */
+.leaflet-control, .leaflet-top, .leaflet-bottom, .leaflet-pane {
+  z-index: 500 !important;
+}
+
 /* Dark mode contrast improvements specifically for Data & Reports sections */
 .dark .text-muted-foreground { color: #cbd5e1 !important; } /* slate-300 */
 .dark .border { border-color: #334155 !important; } /* slate-600 */

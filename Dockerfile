@@ -16,12 +16,17 @@ FROM node:18-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
+ENV PRISMA_CLI_QUERY_ENGINE_TYPE=binary
 # Copy the minimal standalone server and assets
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/prisma ./prisma
+COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
 
 # Next standalone server listens on PORT
 ENV PORT=3000
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["sh", "-lc", "npx prisma db push && node server.js"]

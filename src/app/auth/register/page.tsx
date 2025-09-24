@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { registerUser, getCurrentUser, Role } from "@/lib/auth"
+import { Role } from "@/lib/auth"
 import { REGION_WOREDAS, Region } from "@/lib/regions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { signIn, useSession } from 'next-auth/react'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -19,29 +20,41 @@ export default function RegisterPage() {
   const [woreda, setWoreda] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const redirectedRef = useRef(false)
+  const { data: session, status } = useSession()
 
   useEffect(() => {
-    const u = getCurrentUser()
-    if (u && !redirectedRef.current) {
+    if (status === 'loading') return
+    if (session && !redirectedRef.current) {
       redirectedRef.current = true
       router.replace("/")
     }
-  }, [router])
+  }, [router, session, status])
 
   useEffect(() => {
     if (role !== "woreda_officer") setWoreda(undefined)
   }, [role])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const { user, error } = registerUser({ name, email: email.trim(), role, region, woreda })
-    if (error) {
-      setError(error)
-      return
-    }
-    if (user && !redirectedRef.current) {
-      redirectedRef.current = true
-      router.push("/")
+    setError(null)
+    const body = { name, email: email.trim(), role, region, woreda }
+    try {
+      const res = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        setError(j.error || (res.status === 503 ? 'Service unavailable: Database not configured' : 'Registration failed'))
+        const loginFallback = await signIn('credentials', { email: email.trim(), redirect: false, callbackUrl: '/' })
+        if (!loginFallback?.error) { router.replace('/'); return }
+        return
+      }
+      const login = await signIn('credentials', { email: email.trim(), redirect: false, callbackUrl: '/' })
+      if (login?.error) {
+        setError('Auto login failed')
+        return
+      }
+      router.replace('/')
+    } catch (_e) {
+      setError('Registration failed')
     }
   }
 

@@ -39,16 +39,8 @@ export const DUMMY_USERS: User[] = [
     email: "somali.officer@example.com",
     role: "woreda_officer",
     allowedRegions: ["somali"],
-    placeOfInterest: { region: "somali", woreda: "Gode" },
+    placeOfInterest: { region: "somali", woreda: "Godey" },
   },
-  // {
-  //   id: "4",
-  //   name: "Civilian User",
-  //   email: "civilian@example.com",
-  //   role: "civilian" as any, // removed role; keeping entry commented out
-  //   allowedRegions: ["afar", "somali"],
-  //   placeOfInterest: { region: "afar", woreda: "Elidar" },
-  // },
 ]
 
 const STORAGE_KEY = "auth:user"

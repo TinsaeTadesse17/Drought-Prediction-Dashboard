@@ -6,7 +6,7 @@ import type { Region } from "@/lib/regions"
 const users = [
   { id: '1', name: 'Admin', email: 'admin@example.com', role: 'admin', region: 'afar' as Region },
   { id: '2', name: 'Afar Officer', email: 'afar.officer@example.com', role: 'regional_officer', region: 'afar' as Region },
-  { id: '3', name: 'Somali Officer', email: 'somali.officer@example.com', role: 'woreda_officer', region: 'somali' as Region, woreda: 'Gode' },
+  { id: '3', name: 'Somali Officer', email: 'somali.officer@example.com', role: 'woreda_officer', region: 'somali' as Region, woreda: 'Godey' },
 ]
 
 export const authOptions: NextAuthOptions = {
