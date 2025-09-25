@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { listUsers } from "@/lib/auth"
@@ -10,7 +10,9 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { signIn, useSession } from 'next-auth/react'
 
-export default function LoginPage() {
+export const dynamic = 'force-dynamic'
+
+function LoginFormInner() {
   const router = useRouter()
   const [typedEmail, setTypedEmail] = useState("")
   const [demoEmail, setDemoEmail] = useState("")
@@ -81,5 +83,14 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  // Wrap the inner component that calls useSearchParams in Suspense to satisfy Next.js requirements.
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <LoginFormInner />
+    </Suspense>
   )
 }
