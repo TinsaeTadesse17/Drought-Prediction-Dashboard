@@ -54,7 +54,16 @@ export function AggregateLineChart({ values, title = "Aggregated SPEI (12 months
         <XAxis dataKey="month" tickLine={false} axisLine={false} />
         <YAxis domain={domain as any} tickLine={false} axisLine={false} width={36} allowDecimals tickFormatter={(v)=>Number(v).toFixed(1)} />
         <ReferenceLine y={0} stroke="#8884d8" strokeDasharray="4 4" />
-        <Line type="monotone" dataKey="spei" stroke="var(--color-spei)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} connectNulls />
+        <Line
+          type="monotone"
+          dataKey="spei"
+          stroke="var(--color-spei)"
+          strokeWidth={2}
+          dot={{ r: 3, stroke: '#000', strokeWidth: 1.25, fill: 'var(--color-spei)' }}
+          activeDot={{ r: 4, stroke: '#000', strokeWidth: 1.5, fill: 'var(--color-spei)' }}
+          isAnimationActive={false}
+          connectNulls
+        />
         <ChartTooltip cursor={{ stroke: 'var(--border)' }} content={<ChartTooltipContent />} />
         <ChartLegend content={<ChartLegendContent />} />
       </LineChart>
