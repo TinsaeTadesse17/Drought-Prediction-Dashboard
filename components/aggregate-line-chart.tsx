@@ -47,6 +47,13 @@ export function AggregateLineChart({ values, title = "Aggregated SPEI (12 months
       className="w-full h-[260px] rounded-md border"
       config={{
         spei: { label: "SPEI", color: "hsl(var(--primary))" },
+        // Theme the dot color: light uses the line color; dark uses white for maximum contrast
+        dot: {
+          theme: {
+            light: "var(--color-spei)",
+            dark: "#ffffff"
+          }
+        }
       }}
     >
       <LineChart data={data} margin={{ left: 16, right: 16, top: 10, bottom: 0 }}>
@@ -59,8 +66,8 @@ export function AggregateLineChart({ values, title = "Aggregated SPEI (12 months
           dataKey="spei"
           stroke="var(--color-spei)"
           strokeWidth={2}
-          dot={{ r: 3, stroke: '#000', strokeWidth: 1.25, fill: 'var(--color-spei)' }}
-          activeDot={{ r: 4, stroke: '#000', strokeWidth: 1.5, fill: 'var(--color-spei)' }}
+          dot={{ r: 3, stroke: '#000', strokeWidth: 1.25, fill: 'var(--color-dot, var(--color-spei))' }}
+          activeDot={{ r: 4, stroke: '#000', strokeWidth: 1.5, fill: 'var(--color-dot, var(--color-spei))' }}
           isAnimationActive={false}
           connectNulls
         />
