@@ -198,6 +198,25 @@
   z-index: 500 !important;
 }
 
+/* SPEI tooltip styling to ensure it appears above all predictions */
+.spei-tooltip {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 2px solid #2563eb !important;
+  border-radius: 6px !important;
+  color: #1f2937 !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  padding: 6px 8px !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+  z-index: 1000 !important;
+}
+
+.dark .spei-tooltip {
+  background: rgba(17, 24, 39, 0.95) !important;
+  border: 2px solid #3b82f6 !important;
+  color: #f9fafb !important;
+}
+
 /* Dark mode contrast improvements specifically for Data & Reports sections */
 .dark .text-muted-foreground { color: #cbd5e1 !important; } /* slate-300 */
 .dark .border { border-color: #334155 !important; } /* slate-600 */

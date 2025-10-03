@@ -93,6 +93,16 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         roRef.current = new ResizeObserver(() => invalidate())
         roRef.current.observe(container)
         window.addEventListener("resize", invalidate)
+        
+        // Add zoom event listener to re-render squares with correct ground size
+        mapInstance.current.on('zoomend', () => {
+          // Re-render squares when zoom changes to maintain ground-consistent size
+          if (basePointsLayerRef.current && mapInstance.current) {
+            setTimeout(() => {
+              renderPointMarkers()
+            }, 50) // Small delay to ensure zoom is complete
+          }
+        })
 
         const legend = (L as any).control({ position: "bottomright" }) as Control
         ;(legend as any).onAdd = () => {
@@ -123,19 +133,24 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         loading.style.display = "none"
         container.appendChild(loading)
         loadingRef.current = loading
-        // Create dedicated panes for layering
-        try {
-          if (mapInstance.current && !(mapInstance.current as any)._panes?.pointsPane) {
-            mapInstance.current.createPane('pointsPane')
-            const pane = (mapInstance.current.getPane('pointsPane') as any)
-            if (pane) pane.style.zIndex = 650 // above markerPane(600)
-          }
-          if (mapInstance.current && !(mapInstance.current as any)._panes?.boundaryPane) {
-            mapInstance.current.createPane('boundaryPane')
-            const pane = (mapInstance.current.getPane('boundaryPane') as any)
-            if (pane) pane.style.zIndex = 500 // below pointsPane(650)
-          }
-        } catch {}
+         // Create dedicated panes for layering
+         try {
+           if (mapInstance.current && !(mapInstance.current as any)._panes?.pointsPane) {
+             mapInstance.current.createPane('pointsPane')
+             const pane = (mapInstance.current.getPane('pointsPane') as any)
+             if (pane) pane.style.zIndex = 650 // above markerPane(600)
+           }
+           if (mapInstance.current && !(mapInstance.current as any)._panes?.boundaryPane) {
+             mapInstance.current.createPane('boundaryPane')
+             const pane = (mapInstance.current.getPane('boundaryPane') as any)
+             if (pane) pane.style.zIndex = 500 // below pointsPane(650)
+           }
+           if (mapInstance.current && !(mapInstance.current as any)._panes?.tooltipPane) {
+             mapInstance.current.createPane('tooltipPane')
+             const pane = (mapInstance.current.getPane('tooltipPane') as any)
+             if (pane) pane.style.zIndex = 1000 // highest layer for tooltips
+           }
+         } catch {}
         setMapReady(true)
       }
     }
@@ -351,6 +366,53 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       return cls === 'Extreme Drought' ? CLASS_COLORS.extreme : cls === 'Severe Drought' ? CLASS_COLORS.severe : cls === 'Moderate Drought' ? CLASS_COLORS.moderate : cls === 'Normal' ? CLASS_COLORS.normal : CLASS_COLORS.nodrought
     }
 
+    // Function to generate dense grid points for full coverage
+    const generateDenseGrid = (originalPoints: typeof pts, boundary: any) => {
+      if (!boundary || !turf || originalPoints.length === 0) return originalPoints
+      
+      try {
+        // Get bounds of the original points
+        const lats = originalPoints.map(p => p.lat)
+        const lons = originalPoints.map(p => p.lon)
+        const minLat = Math.min(...lats)
+        const maxLat = Math.max(...lats)
+        const minLon = Math.min(...lons)
+        const maxLon = Math.max(...lons)
+        
+        // Create dense grid spacing for full coverage - slightly smaller than square size for overlap
+        const gridSpacing = 0.003 // Dense spacing to ensure no gaps, creates slight overlap
+        
+        const gridPoints: typeof pts = []
+        
+        // Generate dense grid points
+        for (let lat = minLat; lat <= maxLat; lat += gridSpacing) {
+          for (let lon = minLon; lon <= maxLon; lon += gridSpacing) {
+            const point = turf.point([lon, lat])
+            
+            // Check if point is within boundary
+            if (turf.booleanPointInPolygon(point, boundary)) {
+              // Find nearest original point for interpolation
+              const nearest = originalPoints.reduce((closest, p) => {
+                const dist = Math.sqrt(Math.pow(p.lat - lat, 2) + Math.pow(p.lon - lon, 2))
+                const closestDist = Math.sqrt(Math.pow(closest.lat - lat, 2) + Math.pow(closest.lon - lon, 2))
+                return dist < closestDist ? p : closest
+              })
+              
+              gridPoints.push({
+                lat,
+                lon,
+                value: nearest.value
+              })
+            }
+          }
+        }
+        
+        return gridPoints.length > originalPoints.length ? gridPoints : originalPoints
+      } catch (e) {
+        return originalPoints
+      }
+    }
+
     // Render a single stable layer from the (possibly frozen) points
     const renderStableLayer = () => {
       // Always rebuild base layer so month/color updates reflect immediately
@@ -361,11 +423,46 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         } catch {}
         basePointsLayerRef.current = null
       }
+      // Generate dense grid for full coverage if we have a boundary
+      const zoom = mapInstance.current?.getZoom() || 6
+      const finalPoints = selectedWoredaGeomRef.current 
+        ? generateDenseGrid(pts, selectedWoredaGeomRef.current) 
+        : pts
+      
       const g = L.layerGroup(undefined, { pane: 'pointsPane' } as any)
-      pts.forEach(({ lat, lon, value }) => {
+      
+      // Calculate square size that gets bigger when zooming in
+      // Bigger base size at zoom level 6 for full coverage, then scale up proportionally when zooming in
+      const baseSize = 0.005 // degrees at zoom level 6 - bigger for full coverage
+      const squareSize = baseSize * Math.pow(1.5, zoom - 6) // Scale up when zooming in
+      
+      finalPoints.forEach(({ lat, lon, value }) => {
         const color = Number.isFinite(value) ? colorFor(value) : '#64748b'
-        const m = L.circleMarker([lat, lon] as LatLngTuple, { radius: 4.5, color: '#0f172a', weight: 1, fillColor: color, fillOpacity: 0.9, pane: 'pointsPane' as any })
-        try { m.bindTooltip(`SPEI: ${Number.isFinite(value) ? value.toFixed(3) : '—'}`, { sticky: true }) } catch {}
+        
+        // Create square marker using rectangle that scales up with zoom
+        const halfSize = squareSize / 2
+        const m = L.rectangle(
+          [[lat - halfSize, lon - halfSize], [lat + halfSize, lon + halfSize]],
+          { 
+            color: 'transparent', 
+            weight: 0, 
+            fillColor: color, 
+            fillOpacity: 1.0, 
+            pane: 'pointsPane' as any,
+            interactive: true
+          }
+        )
+        
+        try { 
+          m.bindTooltip(`SPEI: ${Number.isFinite(value) ? value.toFixed(3) : '—'}`, { 
+            sticky: true,
+            direction: 'top',
+            offset: [0, -15],
+            opacity: 1.0,
+            className: 'spei-tooltip',
+            pane: 'tooltipPane'
+          }) 
+        } catch {}
         g.addLayer(m)
       })
       g.addTo(mapInstance.current!)
