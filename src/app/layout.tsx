@@ -24,16 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <style>{`
-html {
-  font-family: ${GeistSans.style.fontFamily};
-  --font-sans: ${GeistSans.variable};
-  --font-mono: ${GeistMono.variable};
-}
-        `}</style>
-      </head>
-      <body>
+      <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           <AppSessionProvider>{children}</AppSessionProvider>
         </ThemeProvider>

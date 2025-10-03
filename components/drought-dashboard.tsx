@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { User as UserIcon, Menu } from "lucide-react"
 import { DroughtMap } from "@/components/drought-map"
+import { AggregateLineChart } from "@/components/aggregate-line-chart"
 import type { Region } from "@/lib/regions"
 import { REGION_WOREDAS } from "@/lib/regions"
 import { getCurrentUser, loginByEmail, logout as authLogout } from "@/lib/auth"
@@ -35,20 +36,23 @@ function phaseFromClass(c: string) {
   return 'Watch'
 }
 
-async function fetchPredictions(region: Region, woreda?: string): Promise<number[]> {
+type GridPoint = { lat: number; lon: number; prediction: number[]; shap_values?: any }
+type PredictionResponse = { aggregated_prediction: number[]; points?: GridPoint[]; woreda_name?: string; region?: string }
+
+async function fetchPredictions(region: Region, woreda?: string, opts?: { aggregateOnly?: boolean }): Promise<PredictionResponse> {
   try {
     const qs = new URLSearchParams()
     if (region) qs.set('region', region)
     if (woreda) qs.set('woreda', woreda)
+    if (opts?.aggregateOnly) qs.set('only', 'aggregate')
     const res = await fetch(`/api/predictions?${qs.toString()}`, { cache: 'no-store' })
     if (!res.ok) throw new Error('predictions api failed')
-    const data = await res.json()
-    const arr: number[] = data.aggregated_prediction
-    if (Array.isArray(arr) && arr.length) return arr
+    const data: PredictionResponse = await res.json()
+    return data
   } catch (e) {
-    return []
+    return { aggregated_prediction: [] }
   }
-  return Array(12).fill(0)
+  return { aggregated_prediction: Array(12).fill(0) }
 }
 
 interface DatasetRow { id: string; name: string; region: string; variable: string; type: string; lastUpdated: string; records: number; status: 'active' | 'processing' | 'archived' }
@@ -69,6 +73,7 @@ export function DroughtDashboard() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const router = useRouter()
   const [predictions, setPredictions] = useState<number[]>(Array(12).fill(0))
+  const [gridPoints, setGridPoints] = useState<GridPoint[]>([])
   const [datasets, setDatasets] = useState<DatasetRow[]>(SAMPLE_DATASETS)
   const [reports, setReports] = useState<ReportRow[]>(SAMPLE_REPORTS)
   const [dataRegion, setDataRegion] = useState('all')
@@ -112,8 +117,12 @@ export function DroughtDashboard() {
   }, [])
 
   useEffect(() => {
-    if (!selectedWoreda) { setPredictions([]); return }
-    fetchPredictions(selectedRegion, selectedWoreda).then(setPredictions)
+    // If no woreda is selected (briefly during role/region changes), keep showing existing data
+    if (!selectedWoreda) return
+    fetchPredictions(selectedRegion, selectedWoreda).then((resp)=>{
+      setPredictions(resp.aggregated_prediction || [])
+      setGridPoints(resp.points || [])
+    })
   }, [selectedRegion, selectedWoreda])
 
   useEffect(() => {
@@ -257,8 +266,8 @@ export function DroughtDashboard() {
           const entries: [string, number[]][] = []
           for (const w of woredas) {
             if (woredaPredictions[w]) continue
-            const preds = await fetchPredictions(reg, w)
-            entries.push([w, preds])
+            const resp = await fetchPredictions(reg, w, { aggregateOnly: true })
+            entries.push([w, resp.aggregated_prediction || []])
           }
           if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
         }
@@ -278,8 +287,8 @@ export function DroughtDashboard() {
         const entries: [string, number[]][] = []
         for (const w of woredas) {
             if (woredaPredictions[w]) { continue }
-            const preds = await fetchPredictions(compareRegion, w)
-            entries.push([w, preds])
+            const resp = await fetchPredictions(compareRegion, w, { aggregateOnly: true })
+            entries.push([w, resp.aggregated_prediction || []])
         }
         if (entries.length) {
           setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
@@ -315,8 +324,8 @@ export function DroughtDashboard() {
       const entries: [string, number[]][] = []
       for (const w of woredas) {
         if (woredaPredictions[w]) continue
-        const preds = await fetchPredictions(selectedRegion, w)
-        entries.push([w, preds])
+  const resp = await fetchPredictions(selectedRegion, w, { aggregateOnly: true })
+  entries.push([w, resp.aggregated_prediction || []])
       }
       if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
     }
@@ -398,12 +407,16 @@ export function DroughtDashboard() {
                     disableInteraction={accountOpen}
                     predictionsByWoreda={Object.fromEntries((REGION_WOREDAS[selectedRegion]||[]).map(w=>[w, woredaPredictions[w]||[]]))}
                     allowedWoredas={allowedWoredasForRegion}
+                    points={gridPoints}
                     onSelectWoreda={setSelectedWoreda}
                   />
                   <div className="mt-4 bg-card border rounded p-4">
                     <div className="flex justify-between items-center mb-2 text-sm"><span>Forecast Month</span><Badge variant="secondary">{currentLabel}</Badge></div>
                     <Slider value={yearMonth} onValueChange={setYearMonth} max={11} min={0} step={1} className="w-full" />
                     <div className="flex justify-between text-[10px] text-muted-foreground mt-1"><span>{MIN_DATE_LABEL}</span><span>{END_DATE_LABEL}</span></div>
+                  </div>
+                  <div className="mt-4">
+                    <AggregateLineChart values={predictions} />
                   </div>
                 </div>
                 <div className="w-full md:w-1/2 space-y-4">
@@ -747,7 +760,7 @@ export function DroughtDashboard() {
                   <CardContent className="text-xs space-y-2">
                     <div><span className="font-semibold">1.</span> Pick Region / Woreda (if permitted)</div>
                     <div><span className="font-semibold">2.</span> Move the month slider</div>
-                    <div><span className="font-semibold">3.</span> Click a woreda polygon on the map</div>
+                    <div><span className="font-semibold">3.</span> View per-grid markers on the basemap</div>
                     <div><span className="font-semibold">4.</span> Review SPEI & phase</div>
                     <div><span className="font-semibold">5.</span> Change theme / language if needed</div>
                   </CardContent>
@@ -774,8 +787,8 @@ export function DroughtDashboard() {
                 <AccordionItem value="map">
                   <AccordionTrigger className="text-sm">Map & Interaction</AccordionTrigger>
                   <AccordionContent className="text-sm space-y-2">
-                    <p>The map is constrained to Afar and Somali regions. Selecting a woreda highlights it and dims the rest. The legend (left on map) lists woredas and severity colors. Click entries to focus.</p>
-                    <p>If the map appears blank, ensure your role has a region assigned. The system defaults to Afar; selecting a region re-fetches the GeoJSON.</p>
+                    <p>The map shows the real basemap (no polygon overlays). Selecting a woreda loads its per-grid predictions from the external API and displays them as colored circle markers.</p>
+                    <p>If the map appears blank, ensure you selected a woreda. The markers are fetched live from the API for the chosen woreda.</p>
                   </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="spei">
@@ -805,7 +818,7 @@ export function DroughtDashboard() {
                     </div>
                     <div>
                       <p className="font-semibold">Why does the map need reselection?</p>
-                      <p className="text-muted-foreground">We force a refresh keyed by region & woreda so it should auto-load now. If not, verify the GeoJSON files exist under /public/geo.</p>
+                      <p className="text-muted-foreground">We force a refresh keyed by region & woreda so it should auto-load now. Data comes directly from the external predictions API.</p>
                     </div>
                     <div>
                       <p className="font-semibold">Can I export data?</p>

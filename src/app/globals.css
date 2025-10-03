@@ -188,8 +188,13 @@
   font-family: inherit;
 }
 
-/* Keep Leaflet controls (legend, zoom, attribution) beneath the sticky navbar (z-[1000]) */
-.leaflet-control, .leaflet-top, .leaflet-bottom, .leaflet-pane {
+/* Ensure the Leaflet map container doesn't paint a white background */
+.leaflet-container {
+  background: transparent !important;
+}
+
+/* Keep Leaflet controls below the sticky navbar without interfering with marker rendering */
+.leaflet-control, .leaflet-top, .leaflet-bottom {
   z-index: 500 !important;
 }
 

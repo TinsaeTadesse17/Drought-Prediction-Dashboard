@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import type { LatLngTuple, Control, Map as LeafletMap, Layer, GeoJSON as LeafletGeoJSON, PathOptions } from "leaflet"
 import type { Region } from "@/lib/regions"
-import { REGION_BOUNDS, REGION_WOREDAS } from "@/lib/regions"
-import { canonicalWoredaName, sameWoreda } from "@/lib/canonical"
+import { REGION_WOREDAS } from "@/lib/regions"
+import { canonicalWoredaName } from "@/lib/canonical"
 
 type Props = {
   region?: Region
@@ -15,20 +15,28 @@ type Props = {
   predictions?: number[]
   predictionsByWoreda?: Record<string, number[]>
   allowedWoredas?: string[]
+  points?: { lat: number; lon: number; prediction: number[]; shap_values?: any }[]
 }
 
-export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas }: Props) {
+export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas, points = [] }: Props) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<LeafletMap | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
-  const geojsonCache = useRef<Record<Region, any | null>>({ afar: null, somali: null })
-  const regionLayerRef = useRef<LeafletGeoJSON | null>(null)
-  const highlightLayerRef = useRef<Layer | null>(null)
   const legendRef = useRef<Control | null>(null)
-  const maskLayerRef = useRef<Layer | null>(null)
   const loadingRef = useRef<HTMLDivElement | null>(null)
+  const pointsLayerRef = useRef<Layer | null>(null)
+  const basePointsLayerRef = useRef<Layer | null>(null)
+  const regionLayerRef = useRef<LeafletGeoJSON | null>(null)
+  const geojsonCache = useRef<Record<Region, any | null>>({ afar: null, somali: null })
   const [ready, setReady] = useState(false)
   const [mapReady, setMapReady] = useState(false)
+  const lastFitKeyRef = useRef<string | null>(null)
+  const lastNonEmptyPtsRef = useRef<{ lat: number; lon: number; prediction: number[] }[] | null>(null)
+  const selectedWoredaGeomRef = useRef<any | null>(null)
+  const boundaryReadyRef = useRef<boolean>(false)
+  // Freeze markers where they first loaded for a given (region,woreda)
+  const frozenKeyRef = useRef<string | null>(null)
+  const frozenPointsRef = useRef<{ lat: number; lon: number; prediction: number[] }[] | null>(null)
 
   // Central canonical function imported; keep a tiny shim for backward compatibility if needed.
   const normalizeWoredaName = (name?: string) => canonicalWoredaName(name)
@@ -89,16 +97,12 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
           const div = L.DomUtil.create("div", "legend")
           div.className = "leaflet-control bg-white/95 dark:bg-gray-800/90 backdrop-blur rounded-md shadow border border-gray-300 dark:border-gray-600 p-3 text-xs max-w-[220px] text-gray-800 dark:text-gray-100";
           div.innerHTML = `
-            <div class='font-semibold mb-1' id='legend-region-name'>Region</div>
-            <div class='mb-2 max-h-28 overflow-auto pr-1' id='legend-woreda-list'></div>
-            <div class='mt-2 border-t pt-2'>
-              <div class='font-semibold mb-1'>Drought Class (SPEI)</div>
-              <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.extreme}'></span><span>Extreme Drought</span></div>
-              <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.severe}'></span><span>Severe Drought</span></div>
-              <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.moderate}'></span><span>Moderate Drought</span></div>
-              <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.normal}'></span><span>Normal</span></div>
-              <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.nodrought}'></span><span>No Drought</span></div>
-            </div>
+            <div class='font-semibold mb-2'>Point SPEI (per grid)</div>
+            <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.extreme}'></span><span>Extreme Drought</span></div>
+            <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.severe}'></span><span>Severe Drought</span></div>
+            <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.moderate}'></span><span>Moderate Drought</span></div>
+            <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.normal}'></span><span>Normal</span></div>
+            <div class='flex items-center gap-2 mb-1'><span class='w-3 h-3 rounded border border-gray-400/50' style='background:${CLASS_COLORS.nodrought}'></span><span>No Drought</span></div>
           `
           return div
         }
@@ -111,6 +115,19 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         loading.style.display = "none"
         container.appendChild(loading)
         loadingRef.current = loading
+        // Create dedicated panes for layering
+        try {
+          if (mapInstance.current && !(mapInstance.current as any)._panes?.pointsPane) {
+            mapInstance.current.createPane('pointsPane')
+            const pane = (mapInstance.current.getPane('pointsPane') as any)
+            if (pane) pane.style.zIndex = 650 // above markerPane(600)
+          }
+          if (mapInstance.current && !(mapInstance.current as any)._panes?.boundaryPane) {
+            mapInstance.current.createPane('boundaryPane')
+            const pane = (mapInstance.current.getPane('boundaryPane') as any)
+            if (pane) pane.style.zIndex = 500 // below pointsPane(650)
+          }
+        } catch {}
         setMapReady(true)
       }
     }
@@ -129,136 +146,222 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     if (loadingRef.current) loadingRef.current.style.display = val ? "flex" : "none"
   }
 
-  useEffect(() => {
-    if (!region || !mapInstance.current || !mapReady) return
-
-    const loadRegionGeo = async () => {
-      setLoading(true)
-      try {
-        if (!geojsonCache.current[region]) {
-          const resp = await fetch(`/geo/filtered_woredas.geojson`).catch(() => fetch(`/filtered_woredas.geojson`))
-          if (!resp || !resp.ok) throw new Error("GeoJSON fetch failed")
-          geojsonCache.current[region] = await resp.json()
-        }
-      } catch (e) {
-        console.warn(e)
-      } finally {
-        setLoading(false)
+  // Load and render region shapefile outlines as non-filled boundaries
+  const ensureRegionLayer = async () => {
+    if (!mapInstance.current || !region) return
+    const L = (await import("leaflet")).default
+    setLoading(true)
+    try {
+      boundaryReadyRef.current = false
+      if (!geojsonCache.current[region]) {
+        // Always use the provided shapefiles with spaces/parentheses in the filenames
+        const rawPath = region === 'afar' ? '/geo/afar_woredas (1).geojson' : '/geo/somali_woredas (1).geojson'
+        const url = encodeURI(rawPath)
+        const resp = await fetch(url)
+        if (!resp.ok) throw new Error(`GeoJSON fetch failed: ${resp.status}`)
+        geojsonCache.current[region] = await resp.json()
       }
-      renderRegion()
-    }
 
-    const renderRegion = async () => {
-      const L = (await import("leaflet")).default
+      // Clear previous
+      if (regionLayerRef.current) {
+        try { mapInstance.current.removeLayer(regionLayerRef.current) } catch {}
+        regionLayerRef.current = null
+      }
+      selectedWoredaGeomRef.current = null
+
+      // If no woreda selected, don't render any outlines
+      if (!woreda) return
+
       const data = geojsonCache.current[region]
-      if (!data || !mapInstance.current) return
-
-      if (regionLayerRef.current) { try { mapInstance.current.removeLayer(regionLayerRef.current) } catch {} }
-      if (highlightLayerRef.current) { try { mapInstance.current.removeLayer(highlightLayerRef.current) } catch {} }
-      if (maskLayerRef.current) { try { mapInstance.current.removeLayer(maskLayerRef.current) } catch {} }
-      regionLayerRef.current = null
-      highlightLayerRef.current = null
-      maskLayerRef.current = null
-
+      // Expand Afar allowed list to include Ewa/Fik mapping
+      const allowed = region === 'afar' ? ['Elidar','Bidu','Kori','Ewa','Fik'] : ['Godey','Fik','Hargele']
+      const wanted = canonicalWoredaName(woreda).toLowerCase()
+      const nameOf = (f: any): string => {
+        const p = f?.properties || {}
+        return canonicalWoredaName(p.name || p.NAME || p.ADM3_EN || p.ADM3NAME || p.ADM_NAME || p.Woreda || p.WOREDA || p.woreda || p.W_NAME || '')
+      }
       const layer = L.geoJSON(data, {
-        style: (feature: any): PathOptions => {
-          const rawName = feature.properties?.name || feature.properties?.ADM3_EN
-          const featName = normalizeWoredaName(rawName)
-          const spei = (predictionsByWoreda[featName]?.[monthIndex]) ?? undefined
-          const cls = classify(typeof spei === 'number' ? spei : 999)
-          const isSelected = sameWoreda(rawName, woreda)
-          const baseColor = cls === 'Extreme Drought' ? CLASS_COLORS.extreme : cls === 'Severe Drought' ? CLASS_COLORS.severe : cls === 'Moderate Drought' ? CLASS_COLORS.moderate : cls === 'Normal' ? CLASS_COLORS.normal : CLASS_COLORS.nodrought
-          return { color: baseColor, weight: isSelected ? 3 : 1, fillColor: baseColor, fillOpacity: isSelected ? 0.65 : 0.4 }
+        filter: (feature: any) => {
+          const n = nameOf(feature)
+          const inAllowed = allowed.some(a => canonicalWoredaName(a).toLowerCase() === n.toLowerCase())
+          return inAllowed && n.toLowerCase() === wanted
         },
-        onEachFeature: (feature, lyr) => {
-          const name = normalizeWoredaName(feature.properties?.name || feature.properties?.ADM3_EN || 'Unknown')
-          const spei = (predictionsByWoreda[name]?.[monthIndex]) ?? undefined
-          const cls = classify(typeof spei === 'number' ? spei : 999)
-          const phase = phaseOf(cls)
-          lyr.on('click', () => {
-            onSelectWoreda && onSelectWoreda(name)
-            const speiText = typeof spei === 'number' ? (spei as number).toFixed(2) : '—'
-            lyr.bindPopup(`<div class='text-sm font-semibold mb-1'>${name}</div><div class='text-xs'>SPEI: ${speiText}</div><div class='text-xs'>Class: ${cls}</div><div class='text-xs'>Phase: ${phase}</div>`).openPopup()
-          })
-        }
-      })
+        style: (): PathOptions => ({ color: '#2563eb', weight: 3, fillOpacity: 0, fill: false, pane: 'boundaryPane' as any, interactive: false })
+      } as any)
       layer.addTo(mapInstance.current)
       regionLayerRef.current = layer
 
+      // Extract geometry and fit
       try {
-        const allBounds = layer.getBounds()
-        if (maskLayerRef.current) mapInstance.current.removeLayer(maskLayerRef.current)
-        const rect = L.rectangle([[-60,-180],[85,180]], { color: '#000', weight: 0, fillOpacity: 0.75, fillColor: '#0f172a' })
-        rect.addTo(mapInstance.current)
-        maskLayerRef.current = rect
-        layer.bringToFront()
-        if (woreda) {
-          regionLayerRef.current.eachLayer((l: any) => {
-            const raw = l.feature?.properties?.name || l.feature?.properties?.ADM3_EN || ''
-            const n = normalizeWoredaName(raw).toLowerCase()
-            const sel = sameWoreda(raw, woreda)
-            l.setStyle({ fillOpacity: sel ? 0.65 : 0.05, opacity: sel ? 1 : 0.3 })
-          })
-        }
-        if (woreda) {
-          regionLayerRef.current.eachLayer((l: any) => {
-            const raw = l.feature?.properties?.name || l.feature?.properties?.ADM3_EN || ''
-            if (sameWoreda(raw, woreda) && l.getBounds) {
-              mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
-            }
-          })
-        } else if (allBounds?.isValid()) {
-          mapInstance.current.fitBounds(allBounds, { padding: [30,30] })
-        }
-      } catch {}
-
-      updateLegend()
-      highlightSelected(woreda)
-      if (!ready) setReady(true)
-    }
-
-    const updateLegend = () => {
-      const regionNameEl = document.getElementById("legend-region-name")
-      if (regionNameEl) regionNameEl.textContent = region === "afar" ? "Afar Region" : "Somali Region"
-      const listEl = document.getElementById("legend-woreda-list")
-      if (listEl) {
-        listEl.innerHTML = ""
-        const all = REGION_WOREDAS[region]
-        const list = allowedWoredas && allowedWoredas.length > 0 ? all.filter(w=>allowedWoredas.includes(w)) : all
-        list.forEach(w => {
-          const div = document.createElement("div")
-            div.textContent = w
-            div.className = `cursor-pointer rounded px-1 py-0.5 ${w === woreda ? 'bg-blue-600 text-white' : 'hover:bg-blue-100 dark:hover:bg-gray-700'}`
-            div.onclick = () => { if (onSelectWoreda) onSelectWoreda(w) }
-            listEl.appendChild(div)
+        layer.eachLayer((l: any) => {
+          selectedWoredaGeomRef.current = l.toGeoJSON()?.geometry || null
+          const b = l.getBounds?.()
+          if (b && b.isValid && b.isValid()) {
+            mapInstance.current!.fitBounds(b, { padding: [40, 40], maxZoom: 11 })
+          }
         })
+      } catch {}
+      // Mark boundary as ready; marker rendering effect will pick this up
+      boundaryReadyRef.current = true
+      // Also proactively render once now
+      try { await renderPointMarkers() } catch {}
+    } finally {
+      setLoading(false)
+    }
+  }
+  // Render per-point markers colored by SPEI for the selected month; no shapefile overlays
+  const renderPointMarkers = async () => {
+    if (!mapInstance.current) return
+    const L = (await import("leaflet")).default
+    // Lazy-load turf only if we have a boundary to filter
+    const hasBoundary = !!selectedWoredaGeomRef.current
+    const turf = hasBoundary ? await import('@turf/turf') : null
+
+    const month = monthIndex ?? 0
+    // Prefer current points; if empty, fall back to last known non-empty set
+    const hasCurrent = Array.isArray(points) && points.length > 0
+    const srcPoints = hasCurrent ? points : (lastNonEmptyPtsRef.current || [])
+    // Build full points (with predictions) and month-view points
+    let currentFull = srcPoints.filter(p => Array.isArray(p.prediction) && p.prediction.length > month)
+
+    // Heuristic: some upstream points may have lat/lon swapped. Ethiopia bounds ~ lat[3,16], lon[33,49].
+    // If most points fall inside when swapped but outside when not, swap them (one time per render input).
+    const withinEth = (la: number, lo: number) => la >= 3 && la <= 16 && lo >= 33 && lo <= 49
+    if (currentFull.length) {
+      let inNormal = 0, inSwapped = 0
+      for (const p of currentFull) {
+        if (withinEth(p.lat, p.lon)) inNormal++
+        if (withinEth(p.lon, p.lat)) inSwapped++
+      }
+      if (inSwapped > inNormal && inSwapped >= Math.max(3, Math.floor(currentFull.length * 0.5))) {
+        currentFull = currentFull.map(p => ({ lat: p.lon, lon: p.lat, prediction: p.prediction }))
+        try { console.warn('[map] swapped lat/lon for prediction points based on bounds heuristic') } catch {}
+      }
+    }
+    // Determine or set frozen points keyed by (region,woreda)
+    const freezeKey = `${region || ''}:${normalizeWoredaName(woreda) || 'none'}`
+    if (!frozenPointsRef.current || frozenKeyRef.current !== freezeKey) {
+      if (currentFull.length) {
+        frozenPointsRef.current = currentFull
+        frozenKeyRef.current = freezeKey
+      }
+    }
+    const baseFull = (frozenKeyRef.current === freezeKey && frozenPointsRef.current?.length) ? frozenPointsRef.current! : currentFull
+    let pts = baseFull
+      .map(p => ({ lat: p.lat, lon: p.lon, value: Number(p.prediction[month]) }))
+      .filter(p => Number.isFinite(p.value))
+
+    // Heuristic: some upstream points may have lat/lon swapped. Ethiopia bounds ~ lat[3,16], lon[33,49].
+    // If most points fall inside when swapped but outside when not, swap them.
+    if (pts.length) {
+      let inNormal = 0, inSwapped = 0
+      for (const p of pts) {
+        if (withinEth(p.lat, p.lon)) inNormal++
+        if (withinEth(p.lon, p.lat)) inSwapped++
+      }
+      if (inSwapped > inNormal && inSwapped >= Math.max(3, Math.floor(pts.length * 0.5))) {
+        // Swap lat/lon for all pts
+        pts = pts.map(p => ({ lat: p.lon, lon: p.lat, value: p.value }))
+        try { console.warn('[map] swapped lat/lon for prediction points based on bounds heuristic') } catch {}
       }
     }
 
-    const highlightSelected = (w?: string) => {
-      if (!regionLayerRef.current || !mapInstance.current) return
-      if (highlightLayerRef.current) { try { mapInstance.current.removeLayer(highlightLayerRef.current) } catch {} }
-      highlightLayerRef.current = null
-      if (!w) return
-      try {
-        regionLayerRef.current.eachLayer((l: any) => {
-          const raw = l.feature?.properties?.name || l.feature?.properties?.ADM3_EN || ''
-            const n = normalizeWoredaName(raw).toLowerCase()
-            const match = sameWoreda(raw, w)
-            l.setStyle({ weight: match ? 3 : 1, fillOpacity: match ? 0.7 : 0.35 })
-            if (match && l.getBounds) {
-              mapInstance.current!.fitBounds(l.getBounds(), { padding: [40,40], maxZoom: 10 })
-            }
-        })
-      } catch {}
+    // Do NOT clip after freezing positions—keep markers where they first loaded
+
+    if (!pts.length) {
+      setReady(true)
+      return
+    }
+    // Record last non-empty raw points
+    if (hasCurrent) {
+      lastNonEmptyPtsRef.current = points
     }
 
-    loadRegionGeo()
-  }, [region, woreda, onSelectWoreda, monthIndex, predictions, mapReady, allowedWoredas])
+    const colorFor = (v: number) => {
+      const cls = classify(v)
+      return cls === 'Extreme Drought' ? CLASS_COLORS.extreme : cls === 'Severe Drought' ? CLASS_COLORS.severe : cls === 'Moderate Drought' ? CLASS_COLORS.moderate : cls === 'Normal' ? CLASS_COLORS.normal : CLASS_COLORS.nodrought
+    }
+
+    // Render a single stable layer from the (possibly frozen) points
+    const renderStableLayer = () => {
+      // Always rebuild base layer so month/color updates reflect immediately
+      if (basePointsLayerRef.current) {
+        try {
+          (basePointsLayerRef.current as any).eachLayer?.((l: any) => { try { l.unbindTooltip?.(); l.unbindPopup?.() } catch {} })
+          mapInstance.current!.removeLayer(basePointsLayerRef.current)
+        } catch {}
+        basePointsLayerRef.current = null
+      }
+      const g = L.layerGroup(undefined, { pane: 'pointsPane' } as any)
+      pts.forEach(({ lat, lon, value }) => {
+        const color = Number.isFinite(value) ? colorFor(value) : '#64748b'
+        const m = L.circleMarker([lat, lon] as LatLngTuple, { radius: 4.5, color: '#0f172a', weight: 1, fillColor: color, fillOpacity: 0.9, pane: 'pointsPane' as any })
+        try { m.bindTooltip(`SPEI: ${Number.isFinite(value) ? value.toFixed(3) : '—'}`, { sticky: true }) } catch {}
+        g.addLayer(m)
+      })
+      g.addTo(mapInstance.current!)
+      basePointsLayerRef.current = g
+      try { (basePointsLayerRef.current as any)?.bringToFront?.() } catch {}
+      // Ensure any previous clipped layer is removed so we render only one stable layer
+      if (pointsLayerRef.current) {
+        try {
+          (pointsLayerRef.current as any).eachLayer?.((l: any) => { try { l.unbindTooltip?.(); l.unbindPopup?.() } catch {} })
+          mapInstance.current!.removeLayer(pointsLayerRef.current)
+        } catch {}
+        pointsLayerRef.current = null
+      }
+    }
+    renderStableLayer()
+
+    // Fit map to points/boundary when the data set changes (debounced by key)
+    try {
+      const key = `${woreda || 'none'}:${month}:${pts.length}:${hasBoundary ? 'B' : 'N'}`
+      if (lastFitKeyRef.current !== key) {
+        if (hasBoundary && regionLayerRef.current) {
+          // Prefer fitting to the selected woreda boundary if available
+          try {
+            regionLayerRef.current.eachLayer((l: any) => {
+              const raw = canonicalWoredaName(l?.feature?.properties?.name || l?.feature?.properties?.ADM3_EN || '')
+              if (raw && canonicalWoredaName(raw).toLowerCase() === canonicalWoredaName(woreda).toLowerCase()) {
+                const b = l.getBounds?.()
+                if (b && b.isValid && b.isValid()) {
+                  mapInstance.current!.fitBounds(b, { padding: [40,40], maxZoom: 12 })
+                }
+              }
+            })
+          } catch {}
+        } else {
+          const latlngs: [number, number][] = pts.map(p => [p.lat, p.lon])
+          const bounds = L.latLngBounds(latlngs as any)
+          if (bounds.isValid()) mapInstance.current!.fitBounds(bounds, { padding: [40,40], maxZoom: 12 })
+        }
+        lastFitKeyRef.current = key
+      }
+    } catch {}
+
+    setReady(true)
+  }
 
   useEffect(() => {
-    if (!region && !mapInstance.current) {
+    // If a woreda is selected, wait until boundary is loaded to render markers (prevents appear-then-disappear)
+    if (!mapReady) return
+    if (woreda) {
+      if (boundaryReadyRef.current) renderPointMarkers()
+      return
     }
+    // No woreda selected: render with whatever points we have
+    renderPointMarkers()
+  }, [points, monthIndex, woreda, mapReady])
+
+  // When region/woreda changes, (re)load the outlines
+  useEffect(() => {
+    if (!mapReady || !region) return
+    // Reload boundary when region or woreda changes
+    ensureRegionLayer()
+  }, [region, woreda, mapReady])
+
+  useEffect(() => {
+    // no-op; kept to preserve dependency on region if needed for external selection UI
   }, [region])
 
   useEffect(() => {
@@ -282,6 +385,11 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     return 'No Drought'
   }
   const phaseOf = (cls: string) => cls === 'Extreme Drought' ? 'Alert' : (cls === 'Severe Drought' || cls === 'Moderate Drought') ? 'Warn' : 'Watch'
+
+  const escapeHtml = (s: string) => {
+    const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+    return s.replace(/[&<>"']/g, (c) => map[c] ?? c)
+  }
 
   return (
     <div
