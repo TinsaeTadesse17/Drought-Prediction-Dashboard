@@ -16,9 +16,10 @@ type Props = {
   predictionsByWoreda?: Record<string, number[]>
   allowedWoredas?: string[]
   points?: { lat: number; lon: number; prediction: number[]; shap_values?: any }[]
+  loading?: boolean
 }
 
-export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas, points = [] }: Props) {
+export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas, points = [], loading = false }: Props) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<LeafletMap | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
@@ -34,6 +35,7 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
   const lastNonEmptyPtsRef = useRef<{ lat: number; lon: number; prediction: number[] }[] | null>(null)
   const selectedWoredaGeomRef = useRef<any | null>(null)
   const boundaryReadyRef = useRef<boolean>(false)
+  const internalLoadingRef = useRef<boolean>(false)
   // Freeze markers where they first loaded for a given (region,woreda)
   const frozenKeyRef = useRef<string | null>(null)
   const frozenPointsRef = useRef<{ lat: number; lon: number; prediction: number[] }[] | null>(null)
@@ -109,9 +111,15 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         legend.addTo(mapInstance.current)
         legendRef.current = legend
 
-        const loading = document.createElement("div")
-        loading.className = "absolute inset-0 flex items-center justify-center pointer-events-none"
-        loading.innerHTML = `<div class='bg-white/80 dark:bg-gray-900/80 px-4 py-2 rounded text-sm font-medium shadow'>Loading map…</div>`
+  const loading = document.createElement("div")
+  loading.className = "absolute inset-0 flex items-center justify-center pointer-events-none z-[1001]"
+        loading.innerHTML = `
+          <div class='bg-white/80 dark:bg-gray-900/80 p-2 rounded shadow flex items-center justify-center'>
+            <svg class='animate-spin h-5 w-5 text-gray-700 dark:text-gray-200' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+              <circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' stroke-width='4'></circle>
+              <path class='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z'></path>
+            </svg>
+          </div>`
         loading.style.display = "none"
         container.appendChild(loading)
         loadingRef.current = loading
@@ -143,14 +151,54 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
   }, [])
 
   const setLoading = (val: boolean) => {
-    if (loadingRef.current) loadingRef.current.style.display = val ? "flex" : "none"
+    if (loadingRef.current) {
+      loadingRef.current.style.display = val ? "flex" : "none"
+      // Ensure spinner-only content (no text)
+      loadingRef.current.innerHTML = `
+        <div class='bg-white/80 dark:bg-gray-900/80 p-2 rounded shadow flex items-center justify-center'>
+          <svg class='animate-spin h-5 w-5 text-gray-700 dark:text-gray-200' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+            <circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' stroke-width='4'></circle>
+            <path class='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z'></path>
+          </svg>
+        </div>`
+    }
   }
+  const recomputeOverlay = () => {
+    const show = internalLoadingRef.current || !!loading
+    setLoading(show)
+  }
+  useEffect(() => { recomputeOverlay() }, [loading, region, woreda])
+
+  // Clear point layers immediately when external loading starts so previous predictions disappear
+  const clearPointLayers = () => {
+    if (!mapInstance.current) return
+    if (basePointsLayerRef.current) {
+      try {
+        (basePointsLayerRef.current as any).eachLayer?.((l: any) => { try { l.unbindTooltip?.(); l.unbindPopup?.() } catch {} })
+        mapInstance.current.removeLayer(basePointsLayerRef.current)
+      } catch {}
+      basePointsLayerRef.current = null
+    }
+    if (pointsLayerRef.current) {
+      try {
+        (pointsLayerRef.current as any).eachLayer?.((l: any) => { try { l.unbindTooltip?.(); l.unbindPopup?.() } catch {} })
+        mapInstance.current.removeLayer(pointsLayerRef.current)
+      } catch {}
+      pointsLayerRef.current = null
+    }
+  }
+  useEffect(() => {
+    if (loading) {
+      clearPointLayers()
+    }
+  }, [loading])
 
   // Load and render region shapefile outlines as non-filled boundaries
   const ensureRegionLayer = async () => {
     if (!mapInstance.current || !region) return
     const L = (await import("leaflet")).default
-    setLoading(true)
+  internalLoadingRef.current = true
+  recomputeOverlay()
     try {
       boundaryReadyRef.current = false
       if (!geojsonCache.current[region]) {
@@ -173,8 +221,8 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       if (!woreda) return
 
       const data = geojsonCache.current[region]
-      // Expand Afar allowed list to include Ewa/Fik mapping
-      const allowed = region === 'afar' ? ['Elidar','Bidu','Kori','Ewa','Fik'] : ['Godey','Fik','Hargele']
+  // Afar allowed list now includes the new Ewa woreda
+  const allowed = region === 'afar' ? ['Elidar','Bidu','Kori','Ewa'] : ['Godey','Fik','Hargele']
       const wanted = canonicalWoredaName(woreda).toLowerCase()
       const nameOf = (f: any): string => {
         const p = f?.properties || {}
@@ -206,7 +254,8 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       // Also proactively render once now
       try { await renderPointMarkers() } catch {}
     } finally {
-      setLoading(false)
+      internalLoadingRef.current = false
+      recomputeOverlay()
     }
   }
   // Render per-point markers colored by SPEI for the selected month; no shapefile overlays
@@ -218,9 +267,15 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     const turf = hasBoundary ? await import('@turf/turf') : null
 
     const month = monthIndex ?? 0
-    // Prefer current points; if empty, fall back to last known non-empty set
+    // Build a freeze key for the current selection
+    const freezeKey = `${region || ''}:${normalizeWoredaName(woreda) || 'none'}`
+    // Prefer fresh points for the current woreda; do NOT fall back to previous woreda
     const hasCurrent = Array.isArray(points) && points.length > 0
-    const srcPoints = hasCurrent ? points : (lastNonEmptyPtsRef.current || [])
+    const srcPoints = hasCurrent
+      ? points
+      : (frozenKeyRef.current === freezeKey && frozenPointsRef.current?.length
+        ? frozenPointsRef.current!
+        : [])
     // Build full points (with predictions) and month-view points
     let currentFull = srcPoints.filter(p => Array.isArray(p.prediction) && p.prediction.length > month)
 
@@ -238,9 +293,8 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         try { console.warn('[map] swapped lat/lon for prediction points based on bounds heuristic') } catch {}
       }
     }
-    // Determine or set frozen points keyed by (region,woreda)
-    const freezeKey = `${region || ''}:${normalizeWoredaName(woreda) || 'none'}`
-    if (!frozenPointsRef.current || frozenKeyRef.current !== freezeKey) {
+    // Determine or set frozen points keyed by (region,woreda) only when we have fresh points for this key
+    if ((!frozenPointsRef.current || frozenKeyRef.current !== freezeKey) && hasCurrent) {
       if (currentFull.length) {
         frozenPointsRef.current = currentFull
         frozenKeyRef.current = freezeKey
@@ -266,12 +320,27 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       }
     }
 
-    // Do NOT clip after freezing positions—keep markers where they first loaded
-
+    // If we still have no points for this woreda, clear layers and wait for data
     if (!pts.length) {
+      // Remove any previous layers to avoid showing stale markers
+      if (basePointsLayerRef.current) {
+        try {
+          (basePointsLayerRef.current as any).eachLayer?.((l: any) => { try { l.unbindTooltip?.(); l.unbindPopup?.() } catch {} })
+          mapInstance.current!.removeLayer(basePointsLayerRef.current)
+        } catch {}
+        basePointsLayerRef.current = null
+      }
+      if (pointsLayerRef.current) {
+        try {
+          (pointsLayerRef.current as any).eachLayer?.((l: any) => { try { l.unbindTooltip?.(); l.unbindPopup?.() } catch {} })
+          mapInstance.current!.removeLayer(pointsLayerRef.current)
+        } catch {}
+        pointsLayerRef.current = null
+      }
       setReady(true)
       return
     }
+    // Do NOT clip after freezing positions—keep markers where they first loaded
     // Record last non-empty raw points
     if (hasCurrent) {
       lastNonEmptyPtsRef.current = points

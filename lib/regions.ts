@@ -1,7 +1,7 @@
 export type Region = "afar" | "somali"
 
 export const REGION_WOREDAS: Record<Region, string[]> = {
-  afar: ["Elidar", "Bidu", "Kori"],
+  afar: ["Elidar", "Bidu", "Kori", "Ewa"],
   somali: ["Godey", "Fik", "Hargele"],
 }
 
@@ -25,6 +25,7 @@ export const WOREDA_COORDS: Record<string, [number, number]> = {
   Elidar: [12.0, 41.9],
   Bidu: [13.0, 41.5],
   Kori: [12.6, 40.5],
+  Ewa: [11.88, 39.88],
   Godey: [5.95, 43.45],
   Fik: [8.13, 43.88],
   Hargele: [6.07, 44.27],

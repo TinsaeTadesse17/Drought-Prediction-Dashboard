@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -39,12 +39,12 @@ function phaseFromClass(c: string) {
 type GridPoint = { lat: number; lon: number; prediction: number[]; shap_values?: any }
 type PredictionResponse = { aggregated_prediction: number[]; points?: GridPoint[]; woreda_name?: string; region?: string }
 
-async function fetchPredictions(region: Region, woreda?: string, opts?: { aggregateOnly?: boolean }): Promise<PredictionResponse> {
+// Always call the API without 'only=aggregate' to keep behavior consistent and avoid shape/prediction mismatches
+async function fetchPredictions(region: Region, woreda?: string, _opts?: { aggregateOnly?: boolean }): Promise<PredictionResponse> {
   try {
     const qs = new URLSearchParams()
     if (region) qs.set('region', region)
     if (woreda) qs.set('woreda', woreda)
-    if (opts?.aggregateOnly) qs.set('only', 'aggregate')
     const res = await fetch(`/api/predictions?${qs.toString()}`, { cache: 'no-store' })
     if (!res.ok) throw new Error('predictions api failed')
     const data: PredictionResponse = await res.json()
@@ -74,6 +74,7 @@ export function DroughtDashboard() {
   const router = useRouter()
   const [predictions, setPredictions] = useState<number[]>(Array(12).fill(0))
   const [gridPoints, setGridPoints] = useState<GridPoint[]>([])
+  const [mapLoading, setMapLoading] = useState<boolean>(false)
   const [datasets, setDatasets] = useState<DatasetRow[]>(SAMPLE_DATASETS)
   const [reports, setReports] = useState<ReportRow[]>(SAMPLE_REPORTS)
   const [dataRegion, setDataRegion] = useState('all')
@@ -84,6 +85,8 @@ export function DroughtDashboard() {
   const [genType, setGenType] = useState('Situation')
   const [genMonths, setGenMonths] = useState([3])
   const [reportTitle, setReportTitle] = useState('')
+  // Track latest fetch to prevent stale responses from overriding current selection
+  const requestIdRef = useRef(0)
 
   const [compareMode, setCompareMode] = useState<'regions'|'woredas'>('regions')
   const [compareRegion, setCompareRegion] = useState<Region>('afar')
@@ -117,12 +120,28 @@ export function DroughtDashboard() {
   }, [])
 
   useEffect(() => {
-    // If no woreda is selected (briefly during role/region changes), keep showing existing data
-    if (!selectedWoreda) return
-    fetchPredictions(selectedRegion, selectedWoreda).then((resp)=>{
-      setPredictions(resp.aggregated_prediction || [])
-      setGridPoints(resp.points || [])
-    })
+    // Any change in region/woreda triggers a fresh load: wipe immediately and show spinner
+    requestIdRef.current += 1
+    const currentId = requestIdRef.current
+    setGridPoints([])
+    setPredictions([])
+    setMapLoading(true)
+
+    // If woreda is not yet selected (e.g., mid-region switch), wait for the next effect run
+    if (!selectedWoreda) {
+      return
+    }
+
+    fetchPredictions(selectedRegion, selectedWoreda)
+      .then((resp) => {
+        if (requestIdRef.current !== currentId) return // stale
+        setPredictions(resp.aggregated_prediction || [])
+        setGridPoints(resp.points || [])
+      })
+      .finally(() => {
+        if (requestIdRef.current !== currentId) return // stale
+        setMapLoading(false)
+      })
   }, [selectedRegion, selectedWoreda])
 
   useEffect(() => {
@@ -266,7 +285,7 @@ export function DroughtDashboard() {
           const entries: [string, number[]][] = []
           for (const w of woredas) {
             if (woredaPredictions[w]) continue
-            const resp = await fetchPredictions(reg, w, { aggregateOnly: true })
+            const resp = await fetchPredictions(reg, w)
             entries.push([w, resp.aggregated_prediction || []])
           }
           if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
@@ -287,7 +306,7 @@ export function DroughtDashboard() {
         const entries: [string, number[]][] = []
         for (const w of woredas) {
             if (woredaPredictions[w]) { continue }
-            const resp = await fetchPredictions(compareRegion, w, { aggregateOnly: true })
+            const resp = await fetchPredictions(compareRegion, w)
             entries.push([w, resp.aggregated_prediction || []])
         }
         if (entries.length) {
@@ -300,6 +319,10 @@ export function DroughtDashboard() {
 
   useEffect(() => {
       // Robust auto-selection for woreda restrictions
+      // Also trigger a clear/loading state when the region changes and before a woreda is resolved
+      setGridPoints([])
+      setPredictions([])
+      setMapLoading(true)
       if (allowedWoredasForRegion.length === 1) {
         const only = allowedWoredasForRegion[0]
         if (selectedWoreda !== only) {
@@ -324,7 +347,7 @@ export function DroughtDashboard() {
       const entries: [string, number[]][] = []
       for (const w of woredas) {
         if (woredaPredictions[w]) continue
-  const resp = await fetchPredictions(selectedRegion, w, { aggregateOnly: true })
+  const resp = await fetchPredictions(selectedRegion, w)
   entries.push([w, resp.aggregated_prediction || []])
       }
       if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
@@ -400,10 +423,12 @@ export function DroughtDashboard() {
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/2">
                   <DroughtMap
+                    key={`${selectedRegion}:${selectedWoreda || 'none'}`}
                     region={selectedRegion}
                     woreda={selectedWoreda}
                     monthIndex={yearMonth[0]}
                     predictions={predictions}
+                    loading={mapLoading}
                     disableInteraction={accountOpen}
                     predictionsByWoreda={Object.fromEntries((REGION_WOREDAS[selectedRegion]||[]).map(w=>[w, woredaPredictions[w]||[]]))}
                     allowedWoredas={allowedWoredasForRegion}

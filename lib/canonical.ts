@@ -6,9 +6,6 @@ const ALIAS_MAP: Record<string, string> = {
   'godey woreda': 'Godey',
   'gode woreda': 'Godey',
   'godey': 'Godey',
-  // Fik is labeled as 'Ewa' in some shapefiles (Afar). Normalize both to 'Fik'.
-  'ewa': 'Fik',
-  'ewa woreda': 'Fik',
   'fik woreda': 'Fik',
   'fik': 'Fik',
 }
