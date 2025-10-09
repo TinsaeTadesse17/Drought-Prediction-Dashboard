@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { signIn, useSession } from 'next-auth/react'
 
+export const dynamic = 'force-dynamic'
+
 export default function RegisterPage() {
   const router = useRouter()
   const [name, setName] = useState("")

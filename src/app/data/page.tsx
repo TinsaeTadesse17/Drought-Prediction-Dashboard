@@ -1,31 +1,7 @@
-"use client"
-
-import { useEffect, useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { getCurrentUser } from '@/lib/auth'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 
+export const dynamic = 'force-dynamic'
 export default function DataPage() {
-  const router = useRouter()
-  const [checked, setChecked] = useState(false)
-  const redirectingRef = useRef(false)
-  const [user, setUser] = useState<any>(null)
-
-  useEffect(() => {
-    const u = getCurrentUser()
-    if (!u) {
-      if (!redirectingRef.current) {
-        redirectingRef.current = true
-        router.replace('/auth/login')
-      }
-    } else {
-      setUser(u)
-      // No role-based filtering needed on this page
-      setChecked(true)
-    }
-  }, [router])
-
-  if (!checked) return null
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-8">
@@ -73,7 +49,7 @@ export default function DataPage() {
           </CardContent>
         </Card>
 
-        {/** Methodology overview card removed as requested **/}
+        {/** Methodology overview card intentionally omitted **/}
       </main>
       
     </div>

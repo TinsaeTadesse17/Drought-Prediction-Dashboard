@@ -9,3 +9,5 @@ export default function NotFound() {
   )
 }
 
+export const dynamic = 'force-dynamic'
+

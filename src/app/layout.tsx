@@ -15,6 +15,8 @@ export const metadata: Metadata = {
   }
 }
 
+export const dynamic = 'force-dynamic'
+
 // Removed force-dynamic & revalidate=0 to allow Next.js to optimize static shell where possible.
 
 export default function RootLayout({
