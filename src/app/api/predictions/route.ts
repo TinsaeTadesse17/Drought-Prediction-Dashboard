@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { FALLBACK_PREDICTIONS } from '@/lib/predictions-fallback'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -74,14 +73,14 @@ export async function GET(req: Request) {
     // User requested aggregate only
     const outPoints = only === 'aggregate' ? [] : points
 
+    // If aggregates still missing, return empty array (no fallback)
     if (arr.length === 0) {
-      const fb = FALLBACK_PREDICTIONS[String(woreda_name)] || []
-      return NextResponse.json({ region, woreda_name, aggregated_prediction: fb, points: outPoints })
+      return NextResponse.json({ region, woreda_name, aggregated_prediction: [], points: outPoints })
     }
     return NextResponse.json({ region, woreda_name, aggregated_prediction: arr, points: outPoints })
   } catch (e: any) {
     console.error('[predictions] upstream fetch failed', woreda, e?.message)
-    const fb = FALLBACK_PREDICTIONS[String(woreda)] || []
-    return NextResponse.json({ region, woreda_name: woreda, aggregated_prediction: fb, points: [] })
+    // On error, return an empty response with no aggregates or points
+    return NextResponse.json({ region, woreda_name: woreda, aggregated_prediction: [], points: [] })
   }
 }

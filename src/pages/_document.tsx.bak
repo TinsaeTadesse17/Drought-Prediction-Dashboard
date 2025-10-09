@@ -1,0 +1,2 @@
+//to prevent Next.js app router build errors
+export {}
