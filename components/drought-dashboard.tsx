@@ -3,7 +3,6 @@
 import { useMemo, useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
@@ -19,8 +18,6 @@ import { useSession, signIn, signOut } from 'next-auth/react'
 import { ThemeToggle } from "@/components/theme-toggle"
 import Image from 'next/image'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableCaption } from "@/components/ui/table"
-import { Input } from "@/components/ui/input"
 
 function classifySPEI(spei: number) {
   if (spei <= -1.5) return 'Extreme Drought'
@@ -55,10 +52,7 @@ async function fetchPredictions(region: Region, woreda?: string, _opts?: { aggre
   return { aggregated_prediction: Array(12).fill(0) }
 }
 
-interface DatasetRow { id: string; name: string; region: string; variable: string; type: string; lastUpdated: string; records: number; status: 'active' | 'processing' | 'archived' }
-const SAMPLE_DATASETS: DatasetRow[] = []
-interface ReportRow { id: string; title: string; region: string; period: string; type: string; created: string; status: 'ready' | 'generating' | 'failed'; sizeKB: number }
-const SAMPLE_REPORTS: ReportRow[] = []
+// Data sources are pulled from GEE; we do not host datasets here.
 
 export function DroughtDashboard() {
   const [activeTab, setActiveTab] = useState("Dashboard")
@@ -75,16 +69,7 @@ export function DroughtDashboard() {
   const [predictions, setPredictions] = useState<number[]>(Array(12).fill(0))
   const [gridPoints, setGridPoints] = useState<GridPoint[]>([])
   const [mapLoading, setMapLoading] = useState<boolean>(false)
-  const [datasets, setDatasets] = useState<DatasetRow[]>(SAMPLE_DATASETS)
-  const [reports, setReports] = useState<ReportRow[]>(SAMPLE_REPORTS)
-  const [dataRegion, setDataRegion] = useState('all')
-  const [dataVariable, setDataVariable] = useState('all')
-  const [dataStatus, setDataStatus] = useState('all')
-  const [dataSearch, setDataSearch] = useState('')
-  const [genRegion, setGenRegion] = useState('afar')
-  const [genType, setGenType] = useState('Situation')
-  const [genMonths, setGenMonths] = useState([3])
-  const [reportTitle, setReportTitle] = useState('')
+  // Data page shows sources only; no dataset listing or filters
   // Track latest fetch to prevent stale responses from overriding current selection
   const requestIdRef = useRef(0)
 
@@ -144,19 +129,7 @@ export function DroughtDashboard() {
       })
   }, [selectedRegion, selectedWoreda])
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const ds = await fetch('/api/datasets', { cache: 'no-store' })
-        if (ds.ok) setDatasets(await ds.json())
-      } catch {}
-      try {
-        const rs = await fetch('/api/reports', { cache: 'no-store' })
-        if (rs.ok) setReports(await rs.json())
-      } catch {}
-    }
-    load()
-  }, [])
+  // No dataset fetching; sources are static (CHIRPS, TerraClimate via GEE)
 
   const MIN_DATE_LABEL = "Aug 2025"
   const END_DATE_LABEL = useMemo(() => {
@@ -218,11 +191,7 @@ export function DroughtDashboard() {
   const hasCurrent = typeof currentSPEI === 'number' && Number.isFinite(currentSPEI)
   const currentClass = hasCurrent ? classifySPEI(currentSPEI as number) : 'No Data'
   const currentPhase = hasCurrent ? phaseFromClass(currentClass) : '—'
-  useEffect(() => {
-    if (currentPhase === 'Warn' || currentPhase === 'Alert') {
-      console.log("[MOCK] Sending email alert:", { user: user?.email, region: selectedRegion, woreda: selectedWoreda, phase: currentPhase, spei: currentSPEI })
-    }
-  }, [currentPhase, currentSPEI, selectedRegion, selectedWoreda, user])
+  // Notifications are not implemented; removed mock email alert side-effect
 
   useEffect(()=>{ if (session) { const sessRegion = (session as any).region || 'afar'; const sessWoreda = (session as any).woreda; setUser({ role: (session as any).role||'admin', allowedRegions: (session as any).role==='admin'?['afar','somali']:[sessRegion], placeOfInterest: { region: sessRegion, woreda: sessWoreda } }); setSelectedRegion(sessRegion); setSelectedWoreda(sessWoreda); } }, [session])
 
@@ -234,45 +203,16 @@ export function DroughtDashboard() {
     router.replace('/auth/login')
   }
 
-  const NAV_ITEMS = ["Dashboard", "Data", "Reports", "Help"] as const
+  const NAV_ITEMS = ["Dashboard", "Data", "Help"] as const
 
   const regionInitRef = (typeof window !== 'undefined') ? (window as any)._regionInitRef ?? { current: false } : { current: false }
   useEffect(()=>{ if (!(regionInitRef as any).current && selectedRegion) { (regionInitRef as any).current = true } }, [selectedRegion])
 
-  useEffect(()=>{ if(user && user.role !== 'admin') { setDataRegion(user.placeOfInterest.region) ; setGenRegion(user.placeOfInterest.region) } },[user])
+  // No data filters; nothing to set based on role
 
-  const filteredDatasets = useMemo(()=>{
-    return datasets.filter(d=>{
-      if (user && user.role !== 'admin' && d.region !== user.placeOfInterest.region) return false
-      if (dataRegion !== 'all' && d.region !== dataRegion) return false
-      if (dataVariable !== 'all' && d.variable !== dataVariable) return false
-      if (dataStatus !== 'all' && d.status !== dataStatus) return false
-      if (dataSearch && !d.name.toLowerCase().includes(dataSearch.toLowerCase())) return false
-      return true
-    })
-  }, [user, dataRegion, dataVariable, dataStatus, dataSearch])
+  // No dataset summary computations
 
-  const dataSummary = useMemo(()=>{
-    const total = filteredDatasets.length
-    const recs = filteredDatasets.reduce((a,d)=>a+d.records,0)
-    const processing = filteredDatasets.filter(d=>d.status==='processing').length
-    return { total, recs, processing }
-  }, [filteredDatasets])
-
-  const visibleReports = useMemo(()=>{
-    return reports.filter(r=>{ if(user && user.role!=='admin' && r.region!==user.placeOfInterest.region) return false; return true })
-  },[user])
-  const reportSummary = useMemo(()=>{
-    const total = visibleReports.length
-    const generating = visibleReports.filter(r=>r.status==='generating').length
-    const ready = visibleReports.filter(r=>r.status==='ready').length
-    return { total, generating, ready }
-  },[visibleReports])
-
-  const handleGenerateReport = () => {
-    console.log('[MOCK] Generate report', { genRegion, genType, months: genMonths[0], title: reportTitle })
-    setReportTitle('')
-  }
+  // Reports feature removed
 
   useEffect(() => {
     const loadAll = async () => {
@@ -590,204 +530,67 @@ export function DroughtDashboard() {
           )}
 
           {activeTab === "Data" && (
-            <div className="space-y-10">
+            <div className="space-y-8">
               <div className="flex flex-col gap-2">
-                <h1 className="text-3xl font-bold tracking-tight">Data</h1>
-                <p className="text-sm text-muted-foreground">Curated drought-related datasets supporting SPEI computation & forecasting.</p>
+                <h1 className="text-3xl font-bold tracking-tight">Data Sources</h1>
+                <p className="text-sm text-muted-foreground">Data are accessed from Google Earth Engine; we do not host or expose raw data here. The model uses CHIRPS precipitation and TerraClimate PET as inputs for monthly water balance and SPEI‑12.</p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Datasets</CardTitle><CardDescription>Filtered count</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{dataSummary.total}</CardContent></Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Records</CardTitle><CardDescription>Aggregate rows</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{dataSummary.recs}</CardContent></Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Processing</CardTitle><CardDescription>Active ingests</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{dataSummary.processing}</CardContent></Card>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">CHIRPS Precipitation</CardTitle>
+                    <CardDescription>UCSB-CHG/CHIRPS/DAILY</CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-xs text-muted-foreground space-y-1">
+                    <p>• Variable: Precipitation (P)</p>
+                    <p>• Temporal resolution: Daily (aggregated to monthly totals)</p>
+                    <p>• Period used: 2000-01 to 2024-12</p>
+                    <p>• Region sampling: 5 km grid over the selected region</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">TerraClimate PET</CardTitle>
+                    <CardDescription>IDAHO_EPSCOR/TERRACLIMATE</CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-xs text-muted-foreground space-y-1">
+                    <p>• Variable: Potential Evapotranspiration (PET)</p>
+                    <p>• Temporal resolution: Monthly</p>
+                    <p>• Period used: 2000-01 to 2024-12</p>
+                    <p>• Region sampling: 5 km grid over the selected region</p>
+                  </CardContent>
+                </Card>
               </div>
               <Card>
-                <CardHeader className="pb-4"><CardTitle className="text-base">Filters</CardTitle><CardDescription>Refine dataset list</CardDescription></CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-col md:flex-row gap-4">
-                    <div className="flex-1">
-                      <label className="text-xs font-medium mb-1 block">Region</label>
-                      <Select value={dataRegion} onValueChange={setDataRegion} disabled={user?.role!== 'admin'}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="afar">Afar</SelectItem>
-                          <SelectItem value="somali">Somali</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-xs font-medium mb-1 block">Variable</label>
-                      <Select value={dataVariable} onValueChange={setDataVariable}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="SPEI">SPEI</SelectItem>
-                          <SelectItem value="Rainfall">Rainfall</SelectItem>
-                          <SelectItem value="NDVI">NDVI</SelectItem>
-                          <SelectItem value="Soil Moisture">Soil Moisture</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-xs font-medium mb-1 block">Status</label>
-                      <Select value={dataStatus} onValueChange={setDataStatus}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="active">Active</SelectItem>
-                          <SelectItem value="processing">Processing</SelectItem>
-                          <SelectItem value="archived">Archived</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-xs font-medium mb-1 block">Search</label>
-                      <Input value={dataSearch} onChange={e=>setDataSearch(e.target.value)} placeholder="Dataset name" />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {user?.role==='admin' && <Button size="sm">Upload Dataset</Button>}
-                    <Button size="sm" variant="secondary">Export CSV</Button>
-                    <Button size="sm" variant="outline" onClick={()=>{ setDataVariable('all'); setDataStatus('all'); setDataSearch(''); if(user?.role==='admin') setDataRegion('all') }}>Reset</Button>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-4"><CardTitle className="text-base">Datasets</CardTitle><CardDescription>Available datasets (mock)</CardDescription></CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Region</TableHead>
-                        <TableHead>Variable</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Records</TableHead>
-                        <TableHead>Last Updated</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredDatasets.map(d=> (
-                        <TableRow key={d.id}>
-                          <TableCell className="font-medium">{d.name}</TableCell>
-                          <TableCell className="capitalize">{d.region}</TableCell>
-                          <TableCell>{d.variable}</TableCell>
-                          <TableCell>{d.type}</TableCell>
-                          <TableCell><Badge variant={d.status==='active'?'default': d.status==='processing'?'secondary':'outline'} className={d.status==='archived'?'opacity-70':''}>{d.status}</Badge></TableCell>
-                          <TableCell className="text-right tabular-nums">{d.records.toLocaleString()}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{d.lastUpdated}</TableCell>
-                        </TableRow>
-                      ))}
-                      {filteredDatasets.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">No datasets match the filters.</TableCell></TableRow>}
-                    </TableBody>
-                    <TableCaption>Mock data – real ingestion & API wiring pending.</TableCaption>
-                  </Table>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Derived products</CardTitle>
+                  <CardDescription>From sources to indices</CardDescription>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground space-y-1">
+                  <p>• Monthly CWB: P (monthly) − PET (monthly)</p>
+                  <p>• 12‑month rolling sum of CWB</p>
+                  <p>• Standardized to Z‑scores (SPEI‑12)</p>
                 </CardContent>
               </Card>
             </div>
           )}
 
-          {activeTab === "Reports" && (
-            <div className="space-y-10">
-              <div className="flex flex-col gap-2">
-                <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
-                <p className="text-sm text-muted-foreground">Generate analytical & situation reports (mock UI until API integration).</p>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Reports</CardTitle><CardDescription>Total</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{reportSummary.total}</CardContent></Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Ready</CardTitle><CardDescription>Downloadable</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{reportSummary.ready}</CardContent></Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Generating</CardTitle><CardDescription>In progress</CardDescription></CardHeader><CardContent className="text-3xl font-semibold">{reportSummary.generating}</CardContent></Card>
-              </div>
-              <Card>
-                <CardHeader className="pb-4"><CardTitle className="text-base">New Report</CardTitle><CardDescription>Configure & generate (mock)</CardDescription></CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                      <label className="text-xs font-medium mb-1 block">Region</label>
-                      <Select value={genRegion} onValueChange={setGenRegion} disabled={user?.role!=='admin'}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="afar">Afar</SelectItem>
-                          <SelectItem value="somali">Somali</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium mb-1 block">Type</label>
-                      <Select value={genType} onValueChange={setGenType}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Situation">Situation</SelectItem>
-                          <SelectItem value="Forecast">Forecast</SelectItem>
-                          <SelectItem value="Rainfall">Rainfall</SelectItem>
-                          <SelectItem value="Vegetation">Vegetation</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium mb-1 block">Months Span</label>
-                      <Slider value={genMonths} onValueChange={setGenMonths} min={1} max={12} step={1} />
-                      <div className="text-[10px] text-muted-foreground mt-1">{genMonths[0]} month(s)</div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium mb-1 block">Custom Title</label>
-                      <Input value={reportTitle} onChange={e=>setReportTitle(e.target.value)} placeholder="e.g. Afar Early Warning Aug 2025" />
-                    </div>
-                  </div>
-                  <Button size="sm" onClick={handleGenerateReport}>Generate</Button>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-4"><CardTitle className="text-base">Recent Reports</CardTitle><CardDescription>Latest generated artefacts (mock)</CardDescription></CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Title</TableHead>
-                        <TableHead>Region</TableHead>
-                        <TableHead>Period</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Size (KB)</TableHead>
-                        <TableHead>Created</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {visibleReports.map(r => (
-                        <TableRow key={r.id}>
-                          <TableCell className="font-medium">{r.title}</TableCell>
-                          <TableCell className="capitalize">{r.region}</TableCell>
-                          <TableCell>{r.period}</TableCell>
-                          <TableCell>{r.type}</TableCell>
-                          <TableCell><Badge variant={r.status==='ready'?'default':r.status==='generating'?'secondary':'outline'} className={r.status==='failed'?'bg-red-600 text-white':''}>{r.status}</Badge></TableCell>
-                          <TableCell className="tabular-nums">{r.sizeKB? r.sizeKB.toLocaleString(): '--'}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{r.created}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                    <TableCaption>Mock list – API integration will enable downloads.</TableCaption>
-                  </Table>
-                </CardContent>
-              </Card>
-            </div>
-          )}
+          {/* Reports tab removed */}
 
           {activeTab === "Help" && (
             <div className="space-y-6 w-full">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-2">Help & Usage</h1>
-                <p className="text-sm text-muted-foreground">Guidance for using the Drought Early Warning Dashboard effectively.</p>
+                <p className="text-sm text-muted-foreground">How the dashboard works today: live forecasts per woreda, satellite-backed inputs, and role-based access.</p>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
                 <Card className="col-span-1">
                   <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Quick Actions</CardTitle></CardHeader>
                   <CardContent className="text-xs space-y-2">
-                    <div><span className="font-semibold">1.</span> Pick Region / Woreda (if permitted)</div>
-                    <div><span className="font-semibold">2.</span> Move the month slider</div>
-                    <div><span className="font-semibold">3.</span> View per-grid markers on the basemap</div>
-                    <div><span className="font-semibold">4.</span> Review SPEI & phase</div>
-                    <div><span className="font-semibold">5.</span> Change theme / language if needed</div>
+                    <div><span className="font-semibold">1.</span> Pick Region / Woreda (as allowed by your role).</div>
+                    <div><span className="font-semibold">2.</span> Use the month slider to explore the 12‑month forecast.</div>
+                    <div><span className="font-semibold">3.</span> Review the current SPEI, classification, and phase for the selected month.</div>
+                    <div><span className="font-semibold">4.</span> Optional: change theme or language.</div>
                   </CardContent>
                 </Card>
                 <Card className="col-span-1">
@@ -796,7 +599,6 @@ export function DroughtDashboard() {
                     <div><span className="font-semibold text-green-600">Watch:</span> Normal / No drought baseline.</div>
                     <div><span className="font-semibold text-orange-600">Warn:</span> Moderate or Severe drought emerging.</div>
                     <div><span className="font-semibold text-red-600">Alert:</span> Extreme drought conditions.</div>
-                    <div className="text-muted-foreground pt-1">Email alerts (mock) for Warn & Alert.</div>
                   </CardContent>
                 </Card>
                 <Card className="col-span-1">
@@ -810,28 +612,23 @@ export function DroughtDashboard() {
               </div>
               <Accordion type="single" collapsible className="w-full">
                 <AccordionItem value="map">
-                  <AccordionTrigger className="text-sm">Map & Interaction</AccordionTrigger>
+                  <AccordionTrigger className="text-sm">Interaction</AccordionTrigger>
                   <AccordionContent className="text-sm space-y-2">
-                    <p>The map shows the real basemap (no polygon overlays). Selecting a woreda loads its per-grid predictions from the external API and displays them as colored circle markers.</p>
-                    <p>If the map appears blank, ensure you selected a woreda. The markers are fetched live from the API for the chosen woreda.</p>
+                    <p>Select a woreda to fetch live predictions from the external API. Use the month slider to examine changes across the 12‑month horizon.</p>
+                    <p>If no values appear, ensure a woreda is selected or try another month.</p>
                   </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="spei">
                   <AccordionTrigger className="text-sm">SPEI & Forecast Slider</AccordionTrigger>
                   <AccordionContent className="text-sm space-y-2">
-                    <p>The slider spans 12 forecast months (Aug 2025 – Aug 2026). SPEI (Standardized Precipitation–Evapotranspiration Index) values update for the selected month. Accuracy conceptually decays over time (placeholder logic now).</p>
+                    <p>The slider spans a 12‑month horizon. SPEI (Standardized Precipitation–Evapotranspiration Index) updates with the selected month. Accuracy is shown conceptually decaying over lead time.</p>
                   </AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="alerts">
-                  <AccordionTrigger className="text-sm">Alerts & Email Logic</AccordionTrigger>
-                  <AccordionContent className="text-sm space-y-2">
-                    <p>Warn or Alert phases automatically trigger a mock email dispatch (visible in console). Real integrations would send notifications to configured recipients.</p>
-                  </AccordionContent>
-                </AccordionItem>
+                {/* Notifications are not implemented; alerts section removed */}
                 <AccordionItem value="localization">
                   <AccordionTrigger className="text-sm">Language & Theme</AccordionTrigger>
                   <AccordionContent className="text-sm space-y-2">
-                    <p>Use the language selector for translation (currently headline only prototype). Theme toggle switches light / dark for better situational visibility.</p>
+                    <p>Language selector currently translates the headline only (prototype). Theme toggle switches light/dark for better visibility.</p>
                   </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="faq">
@@ -839,15 +636,15 @@ export function DroughtDashboard() {
                   <AccordionContent className="text-sm space-y-3">
                     <div>
                       <p className="font-semibold">Why no data for my woreda?</p>
-                      <p className="text-muted-foreground">Mock predictions are deterministic placeholders until real API integration.</p>
+                      <p className="text-muted-foreground">Predictions load from an external API on selection. If none appear, ensure a woreda is selected and try another month.</p>
                     </div>
                     <div>
-                      <p className="font-semibold">Why does the map need reselection?</p>
-                      <p className="text-muted-foreground">We force a refresh keyed by region & woreda so it should auto-load now. Data comes directly from the external predictions API.</p>
+                      <p className="font-semibold">Why do I need to reselect sometimes?</p>
+                      <p className="text-muted-foreground">The view refreshes when region or woreda changes to prevent stale data and ensure fresh API results.</p>
                     </div>
                     <div>
                       <p className="font-semibold">Can I export data?</p>
-                      <p className="text-muted-foreground">Planned in the future Data section.</p>
+                      <p className="text-muted-foreground">A CSV export is planned from the Data section.</p>
                     </div>
                   </AccordionContent>
                 </AccordionItem>
@@ -856,7 +653,6 @@ export function DroughtDashboard() {
                 <CardHeader className="pb-2"><CardTitle className="text-sm">Further Support</CardTitle></CardHeader>
                 <CardContent className="text-xs text-muted-foreground space-y-1">
                   <p>For feature requests or access changes, contact the system administrator.</p>
-                  <p>Real API & localization expansion are upcoming milestones.</p>
                 </CardContent>
               </Card>
             </div>
