@@ -1,16 +1,19 @@
-import NextErrorComponent from 'next/error'
 import type { NextPageContext } from 'next'
 
-type Props = { statusCode?: number }
-
-function ErrorPage({ statusCode }: Props) {
-	return <NextErrorComponent statusCode={statusCode ?? 500} />
+function ErrorPage({ statusCode }: { statusCode?: number }) {
+  return (
+    <main style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+      <div style={{ textAlign: 'center' }}>
+        <h1 style={{ fontSize: 24, fontWeight: 600 }}>Error {statusCode ?? ''}</h1>
+        <p style={{ color: 'var(--muted-foreground, #666)' }}>An error occurred.</p>
+      </div>
+    </main>
+  )
 }
 
 ErrorPage.getInitialProps = ({ res, err }: NextPageContext) => {
-	const statusCode = res?.statusCode ?? (err as any)?.statusCode ?? 404
-	return { statusCode }
+  const statusCode = res ? res.statusCode : err ? (err as any).statusCode : 404
+  return { statusCode }
 }
 
 export default ErrorPage
-

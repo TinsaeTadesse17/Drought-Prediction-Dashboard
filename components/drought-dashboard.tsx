@@ -18,6 +18,7 @@ import { useSession, signIn, signOut } from 'next-auth/react'
 import { ThemeToggle } from "@/components/theme-toggle"
 import Image from 'next/image'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
+import ReportsPanel from '@/components/reports-panel'
 
 function classifySPEI(spei: number) {
   if (spei <= -1.5) return 'Extreme Drought'
@@ -56,7 +57,7 @@ async function fetchPredictions(region: Region, woreda?: string, _opts?: { aggre
 
 export function DroughtDashboard() {
   const [activeTab, setActiveTab] = useState("Dashboard")
-  const [selectedRegion, setSelectedRegion] = useState<Region>("afar")
+  const [selectedRegion, setSelectedRegion] = useState<Region | undefined>("afar")
   const [selectedWoreda, setSelectedWoreda] = useState<string | undefined>(undefined)
   const [yearMonth, setYearMonth] = useState([0])
   const [lang, setLang] = useState("en")
@@ -99,24 +100,36 @@ export function DroughtDashboard() {
     const u = getCurrentUser()
     if (u) {
       setUser(u)
-      setSelectedRegion(u.placeOfInterest.region)
-      setSelectedWoreda(u.placeOfInterest.woreda)
+      // Do not auto-select a region for admin users; let them pick
+  if (u.role === 'admin') setSelectedRegion(undefined as any)
+  else setSelectedRegion(u.placeOfInterest.region)
+      // Only pre-select a woreda for users that are woreda officers.
+      if (u.role === 'woreda_officer') {
+        setSelectedWoreda(u.placeOfInterest.woreda)
+      } else {
+        setSelectedWoreda(undefined)
+      }
     }
   }, [])
 
   useEffect(() => {
-    // Any change in region/woreda triggers a fresh load: wipe immediately and show spinner
+    // Only fetch predictions and show spinner when a woreda is selected
     requestIdRef.current += 1
     const currentId = requestIdRef.current
     setGridPoints([])
     setPredictions([])
-    setMapLoading(true)
 
-    // If woreda is not yet selected (e.g., mid-region switch), wait for the next effect run
     if (!selectedWoreda) {
+      // No woreda chosen: do not show spinner (regional/admin overview)
+      setMapLoading(false)
       return
     }
 
+    setMapLoading(true)
+    if (!selectedRegion) {
+      setMapLoading(false)
+      return
+    }
     fetchPredictions(selectedRegion, selectedWoreda)
       .then((resp) => {
         if (requestIdRef.current !== currentId) return // stale
@@ -151,6 +164,7 @@ export function DroughtDashboard() {
   const allowedRegions: Region[] = user?.allowedRegions ?? ["afar", "somali"]
 
   const allowedWoredasForRegion = useMemo(() => {
+    if (!selectedRegion) return []
     if (!user) return REGION_WOREDAS[selectedRegion]
     if (user.role === "woreda_officer") {
       const w = user.placeOfInterest.woreda
@@ -159,7 +173,8 @@ export function DroughtDashboard() {
     return REGION_WOREDAS[selectedRegion]
   }, [user, selectedRegion])
 
-  const ensureWoreda = (reg: Region, w?: string) => {
+  const ensureWoreda = (reg?: Region, w?: string) => {
+    if (!reg) return undefined
     if (!w) {
       if (user?.role === "woreda_officer") {
         const uw = user.placeOfInterest.woreda
@@ -193,7 +208,19 @@ export function DroughtDashboard() {
   const currentPhase = hasCurrent ? phaseFromClass(currentClass) : '—'
   // Notifications are not implemented; removed mock email alert side-effect
 
-  useEffect(()=>{ if (session) { const sessRegion = (session as any).region || 'afar'; const sessWoreda = (session as any).woreda; setUser({ role: (session as any).role||'admin', allowedRegions: (session as any).role==='admin'?['afar','somali']:[sessRegion], placeOfInterest: { region: sessRegion, woreda: sessWoreda } }); setSelectedRegion(sessRegion); setSelectedWoreda(sessWoreda); } }, [session])
+  useEffect(()=>{
+    if (!session) return
+    const sessRegion = (session as any).region || 'afar'
+    const sessWoreda = (session as any).woreda
+    const role = (session as any).role || 'admin'
+    setUser({ role, allowedRegions: role === 'admin' ? ['afar','somali'] : [sessRegion], placeOfInterest: { region: sessRegion, woreda: sessWoreda } })
+    // For admin don't auto-select a region on login; let them pick
+  if (role === 'admin') setSelectedRegion(undefined as any)
+  else setSelectedRegion(sessRegion)
+    // Only auto-select a woreda for users whose role is 'woreda_officer'
+    if (role === 'woreda_officer') setSelectedWoreda(sessWoreda)
+    else setSelectedWoreda(undefined)
+  }, [session])
 
   const handleLogout = async () => {
     try { authLogout() } catch {}
@@ -203,7 +230,7 @@ export function DroughtDashboard() {
     router.replace('/auth/login')
   }
 
-  const NAV_ITEMS = ["Dashboard", "Data", "Help"] as const
+  const NAV_ITEMS = ["Dashboard", "Data", "Reports", "Help"] as const
 
   const regionInitRef = (typeof window !== 'undefined') ? (window as any)._regionInitRef ?? { current: false } : { current: false }
   useEffect(()=>{ if (!(regionInitRef as any).current && selectedRegion) { (regionInitRef as any).current = true } }, [selectedRegion])
@@ -262,17 +289,20 @@ export function DroughtDashboard() {
       // Also trigger a clear/loading state when the region changes and before a woreda is resolved
       setGridPoints([])
       setPredictions([])
-      setMapLoading(true)
-      if (allowedWoredasForRegion.length === 1) {
-        const only = allowedWoredasForRegion[0]
-        if (selectedWoreda !== only) {
-          setSelectedWoreda(ensureWoreda(selectedRegion, only))
+    // Do not show the spinner at region-level; spinner appears only when fetching predictions for a selected woreda
+      // Only auto-select a woreda for 'woreda_officer' users. Admins and regional officers start with no woreda selected.
+      if (user?.role === 'woreda_officer') {
+        if (allowedWoredasForRegion.length === 1) {
+          const only = allowedWoredasForRegion[0]
+          if (selectedWoreda !== only) {
+            setSelectedWoreda(ensureWoreda(selectedRegion, only))
+            return
+          }
+        }
+        if (!selectedWoreda && allowedWoredasForRegion.length > 0) {
+          setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
           return
         }
-      }
-      if (!selectedWoreda && allowedWoredasForRegion.length > 0) {
-        setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
-        return
       }
       if (selectedWoreda && !allowedWoredasForRegion.includes(selectedWoreda)) {
         if (allowedWoredasForRegion.length > 0) setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
@@ -309,7 +339,17 @@ export function DroughtDashboard() {
           </div>
           <nav className="hidden md:flex items-center space-x-6">
             {NAV_ITEMS.map(tab => (
-              <button key={tab} onClick={()=>{setActiveTab(tab); setMobileNavOpen(false)}} className={`px-2 py-2 text-sm font-medium transition-colors ${activeTab===tab?"text-primary border-b-2 border-primary":"text-muted-foreground hover:text-foreground"}`}>{tab}</button>
+              <button
+                key={tab}
+                onClick={() => {
+                  // Keep navbar and show Reports as an in-dashboard tab for consistent shell
+                  setActiveTab(tab)
+                  setMobileNavOpen(false)
+                }}
+                className={`px-2 py-2 text-sm font-medium transition-colors ${activeTab===tab?"text-primary border-b-2 border-primary":"text-muted-foreground hover:text-foreground"}`}
+              >
+                {tab}
+              </button>
             ))}
           </nav>
           <div className="flex items-center space-x-2">
@@ -346,7 +386,13 @@ export function DroughtDashboard() {
         </div>
         {mobileNavOpen && <div className="md:hidden border-t px-4 pb-3 flex flex-col gap-1 bg-card">
           {NAV_ITEMS.map(tab => (
-            <button key={tab} onClick={()=>{setActiveTab(tab); setMobileNavOpen(false)}} className={`text-left px-2 py-2 rounded text-sm ${activeTab===tab?"bg-accent text-primary":"hover:bg-accent"}`}>{tab}</button>
+            <button
+              key={tab}
+              onClick={()=>{ setActiveTab(tab); setMobileNavOpen(false) }}
+              className={`text-left px-2 py-2 rounded text-sm ${activeTab===tab?"bg-accent text-primary":"hover:bg-accent"}`}
+            >
+              {tab}
+            </button>
           ))}
         </div>}
       </header>
@@ -362,19 +408,31 @@ export function DroughtDashboard() {
 
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/2">
-                  <DroughtMap
-                    key={`${selectedRegion}:${selectedWoreda || 'none'}`}
-                    region={selectedRegion}
-                    woreda={selectedWoreda}
-                    monthIndex={yearMonth[0]}
-                    predictions={predictions}
-                    loading={mapLoading}
-                    disableInteraction={accountOpen}
-                    predictionsByWoreda={Object.fromEntries((REGION_WOREDAS[selectedRegion]||[]).map(w=>[w, woredaPredictions[w]||[]]))}
-                    allowedWoredas={allowedWoredasForRegion}
-                    points={gridPoints}
-                    onSelectWoreda={setSelectedWoreda}
-                  />
+                  {
+                    (() => {
+                      const predsByW: Record<string, number[]> = {}
+                      if (selectedRegion) {
+                        for (const w of REGION_WOREDAS[selectedRegion] || []) predsByW[w] = woredaPredictions[w] || []
+                      }
+                      return (
+                        <DroughtMap
+                          key={`${selectedRegion || 'none'}:${selectedWoreda || 'none'}`}
+                          region={selectedRegion as Region}
+                          woreda={selectedWoreda}
+                          monthIndex={yearMonth[0]}
+                          predictions={predictions}
+                          loading={mapLoading}
+                          disableInteraction={accountOpen}
+                          predictionsByWoreda={predsByW}
+                          allowedWoredas={allowedWoredasForRegion}
+                          points={gridPoints}
+                          onSelectWoreda={setSelectedWoreda}
+                          // When admin is viewing and no woreda selected, allow showing both regions outlines
+                          showRegions={(user && user.role === 'admin' && !selectedWoreda && !selectedRegion) ? ['afar','somali'] : undefined}
+                        />
+                      )
+                    })()
+                  }
                   <div className="mt-4 bg-card border rounded p-4">
                     <div className="flex justify-between items-center mb-2 text-sm"><span>Forecast Month</span><Badge variant="secondary">{currentLabel}</Badge></div>
                     <Slider value={yearMonth} onValueChange={setYearMonth} max={11} min={0} step={1} className="w-full" />
@@ -575,7 +633,11 @@ export function DroughtDashboard() {
             </div>
           )}
 
-          {/* Reports tab removed */}
+          {activeTab === "Reports" && (
+            <div className="space-y-8">
+              <ReportsPanel />
+            </div>
+          )}
 
           {activeTab === "Help" && (
             <div className="space-y-6 w-full">

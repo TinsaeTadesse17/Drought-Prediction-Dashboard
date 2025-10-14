@@ -17,9 +17,10 @@ type Props = {
   allowedWoredas?: string[]
   points?: { lat: number; lon: number; prediction: number[]; shap_values?: any }[]
   loading?: boolean
+  showRegions?: Region[]
 }
 
-export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas, points = [], loading = false }: Props) {
+export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda, monthIndex = 0, predictions = [], predictionsByWoreda = {}, allowedWoredas, points = [], loading = false, showRegions }: Props) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<LeafletMap | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
@@ -27,7 +28,7 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
   const loadingRef = useRef<HTMLDivElement | null>(null)
   const pointsLayerRef = useRef<Layer | null>(null)
   const basePointsLayerRef = useRef<Layer | null>(null)
-  const regionLayerRef = useRef<LeafletGeoJSON | null>(null)
+  const regionLayerRef = useRef<any | null>(null)
   const geojsonCache = useRef<Record<Region, any | null>>({ afar: null, somali: null })
   const [ready, setReady] = useState(false)
   const [mapReady, setMapReady] = useState(false)
@@ -210,63 +211,123 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
 
   // Load and render region shapefile outlines as non-filled boundaries
   const ensureRegionLayer = async () => {
-    if (!mapInstance.current || !region) return
+    if (!mapInstance.current) return
     const L = (await import("leaflet")).default
-  internalLoadingRef.current = true
-  recomputeOverlay()
+    internalLoadingRef.current = true
+    recomputeOverlay()
     try {
       boundaryReadyRef.current = false
-      if (!geojsonCache.current[region]) {
-        // Always use the provided shapefiles with spaces/parentheses in the filenames
-        const rawPath = region === 'afar' ? '/geo/afar_woredas (1).geojson' : '/geo/somali_woredas (1).geojson'
-        const url = encodeURI(rawPath)
-        const resp = await fetch(url)
-        if (!resp.ok) throw new Error(`GeoJSON fetch failed: ${resp.status}`)
-        geojsonCache.current[region] = await resp.json()
-      }
+
+      // Determine which regions to show: prefer explicit showRegions prop, otherwise single region
+  const regionsToShow: Region[] = (Array.isArray(showRegions) && showRegions.length > 0) ? showRegions : (region ? [region] : [])
+      // Backwards-compat: if no explicit prop, but region is present, we show that one
+      // If still empty, nothing to do
+      if (regionsToShow.length === 0) return
 
       // Clear previous
       if (regionLayerRef.current) {
         try { mapInstance.current.removeLayer(regionLayerRef.current) } catch {}
         regionLayerRef.current = null
       }
-      selectedWoredaGeomRef.current = null
 
-      // If no woreda selected, don't render any outlines
-      if (!woreda) return
+      const group = L.layerGroup()
 
-      const data = geojsonCache.current[region]
-  // Afar allowed list now includes the new Ewa woreda
-  const allowed = region === 'afar' ? ['Elidar','Bidu','Kori','Ewa'] : ['Godey','Fik','Hargele']
-      const wanted = canonicalWoredaName(woreda).toLowerCase()
+      const turf = await import('@turf/turf')
+
       const nameOf = (f: any): string => {
         const p = f?.properties || {}
         return canonicalWoredaName(p.name || p.NAME || p.ADM3_EN || p.ADM3NAME || p.ADM_NAME || p.Woreda || p.WOREDA || p.woreda || p.W_NAME || '')
       }
-      const layer = L.geoJSON(data, {
-        filter: (feature: any) => {
-          const n = nameOf(feature)
-          const inAllowed = allowed.some(a => canonicalWoredaName(a).toLowerCase() === n.toLowerCase())
-          return inAllowed && n.toLowerCase() === wanted
-        },
-        style: (): PathOptions => ({ color: '#2563eb', weight: 3, fillOpacity: 0, fill: false, pane: 'boundaryPane' as any, interactive: false })
-      } as any)
-      layer.addTo(mapInstance.current)
-      regionLayerRef.current = layer
 
-      // Extract geometry and fit
-      try {
-        layer.eachLayer((l: any) => {
-          selectedWoredaGeomRef.current = l.toGeoJSON()?.geometry || null
-          const b = l.getBounds?.()
-          if (b && b.isValid && b.isValid()) {
-            mapInstance.current!.fitBounds(b, { padding: [40, 40], maxZoom: 11 })
+      for (const r of regionsToShow) {
+        if (!geojsonCache.current[r]) {
+          const rawPath = r === 'afar' ? '/geo/afar_woredas (1).geojson' : '/geo/somali_woredas (1).geojson'
+          const url = encodeURI(rawPath)
+          const resp = await fetch(url)
+          if (!resp.ok) continue
+          geojsonCache.current[r] = await resp.json()
+        }
+        const data = geojsonCache.current[r]
+        const allowed = Array.isArray(REGION_WOREDAS[r]) ? REGION_WOREDAS[r] : []
+
+        // Render woreda polygons (filtered to allowed list)
+        try {
+          const woredaLayer = L.geoJSON(data, {
+            filter: (feature: any) => {
+              const n = nameOf(feature)
+              return allowed.some(a => canonicalWoredaName(a).toLowerCase() === n.toLowerCase())
+            },
+            style: (): PathOptions => ({ color: '#2563eb', weight: 1.2, fillOpacity: 0.03, fill: true, pane: 'boundaryPane' as any, interactive: true })
+          } as any)
+
+          woredaLayer.eachLayer((l: any) => {
+            try {
+              l.on && l.on('click', () => {
+                const n = nameOf(l.feature)
+                if (onSelectWoreda) onSelectWoreda(n)
+                try { const b = l.getBounds?.(); if (b && b.isValid && b.isValid()) mapInstance.current!.fitBounds(b, { padding: [40,40], maxZoom: 12 }) } catch {}
+              })
+            } catch {}
+          })
+          group.addLayer(woredaLayer)
+        } catch {}
+
+        // Build a union/outline for the whole region using turf
+        try {
+          const feats = (data && data.features) ? data.features : []
+          let unionGeom: any = null
+          for (const f of feats) {
+            try {
+              const feat = turf.default ? turf.default.feature(f.geometry, f.properties) : f
+              if (!unionGeom) unionGeom = feat
+              else {
+                // union may fail for some pairs; wrap in try
+                try { unionGeom = turf.union(unionGeom, feat) } catch { /* ignore union errors for complex features */ }
+              }
+            } catch {}
           }
-        })
-      } catch {}
-      // Mark boundary as ready; marker rendering effect will pick this up
-      boundaryReadyRef.current = true
-      // Also proactively render once now
+          if (unionGeom) {
+            const outline = L.geoJSON(unionGeom, { style: (): PathOptions => ({ color: '#0ea5e9', weight: 3, fillOpacity: 0, pane: 'boundaryPane' as any, interactive: false }) } as any)
+            group.addLayer(outline)
+          }
+        } catch {}
+      }
+
+      try { group.addTo(mapInstance.current); regionLayerRef.current = group } catch { regionLayerRef.current = null }
+
+      // If no woreda is selected, fit the map to the combined region group bounds
+      if (!woreda && regionLayerRef.current) {
+        try {
+          const bounds = (regionLayerRef.current as any).getBounds ? (regionLayerRef.current as any).getBounds() : null
+          if (bounds && bounds.isValid && bounds.isValid()) {
+            try { mapInstance.current!.fitBounds(bounds, { padding: [40,40], maxZoom: 8 }) } catch {}
+          }
+        } catch {}
+      }
+
+      // If a woreda was selected, try to find it and fit to its bounds
+      if (woreda && regionLayerRef.current) {
+        try {
+          regionLayerRef.current.eachLayer((layer: any) => {
+            try {
+              if (layer.eachLayer) {
+                layer.eachLayer((l: any) => {
+                  const raw = canonicalWoredaName(l?.feature?.properties?.name || l?.feature?.properties?.ADM3_EN || '')
+                  if (raw && canonicalWoredaName(raw).toLowerCase() === canonicalWoredaName(woreda).toLowerCase()) {
+                    selectedWoredaGeomRef.current = l.toGeoJSON()?.geometry || null
+                    const b = l.getBounds?.()
+                    if (b && b.isValid && b.isValid()) {
+                      try { mapInstance.current!.fitBounds(b, { padding: [40, 40], maxZoom: 11 }) } catch {}
+                    }
+                  }
+                })
+              }
+            } catch {}
+          })
+        } catch {}
+      }
+
+  boundaryReadyRef.current = true
       try { await renderPointMarkers() } catch {}
     } finally {
       internalLoadingRef.current = false
@@ -521,10 +582,13 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
 
   // When region/woreda changes, (re)load the outlines
   useEffect(() => {
-    if (!mapReady || !region) return
-    // Reload boundary when region or woreda changes
+    // Reload boundary when region, showRegions or woreda changes. Previously this required `region` to be set;
+    // allow running when showRegions is provided so admin overview (no region) loads correctly.
+    const hasRegionsToShow = Array.isArray(showRegions) && showRegions.length > 0
+    if (!mapReady || (!region && !hasRegionsToShow)) return
+    // Reload boundary when region or woreda or showRegions changes
     ensureRegionLayer()
-  }, [region, woreda, mapReady])
+  }, [region, woreda, mapReady, showRegions])
 
   useEffect(() => {
     // no-op; kept to preserve dependency on region if needed for external selection UI
