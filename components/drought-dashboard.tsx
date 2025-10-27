@@ -18,6 +18,8 @@ import { useSession, signIn, signOut } from 'next-auth/react'
 import { ThemeToggle } from "@/components/theme-toggle"
 import Image from 'next/image'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { InfoIcon } from 'lucide-react'
 import ReportsPanel from '@/components/reports-panel'
 
 function classifySPEI(spei: number) {
@@ -144,17 +146,20 @@ export function DroughtDashboard() {
 
   // No dataset fetching; sources are static (CHIRPS, TerraClimate via GEE)
 
-  const MIN_DATE_LABEL = "Aug 2025"
-  const END_DATE_LABEL = useMemo(() => {
-    const start = new Date("2025-08-01T00:00:00Z")
-    const d = new Date(start)
-    d.setUTCMonth(start.getUTCMonth() + 11)
+  const MIN_DATE_LABEL = useMemo(() => {
+    const now = new Date()
+    const d = new Date(now.getFullYear(), now.getMonth() - 11, 1)
     return d.toLocaleString("en-US", { month: "short", year: "numeric" })
   }, [])
+  
+  const END_DATE_LABEL = useMemo(() => {
+    const now = new Date()
+    return now.toLocaleString("en-US", { month: "short", year: "numeric" })
+  }, [])
+  
   const currentLabel = useMemo(() => {
-    const start = new Date("2025-08-01T00:00:00Z")
-    const d = new Date(start)
-    d.setUTCMonth(start.getUTCMonth() + yearMonth[0])
+    const now = new Date()
+    const d = new Date(now.getFullYear(), now.getMonth() - 11 + yearMonth[0], 1)
     return d.toLocaleString("en-US", { month: "short", year: "numeric" })
   }, [yearMonth])
 
@@ -326,6 +331,7 @@ export function DroughtDashboard() {
   }, [selectedRegion])
 
   return (
+    <TooltipProvider>
     <div className="min-h-screen bg-background flex flex-col">
       {/* Elevated z-index so the navbar stays above Leaflet panes (tile=200..control=800) */}
       <header className="border-b bg-card sticky top-0 z-[1000] shadow-sm">
@@ -406,6 +412,23 @@ export function DroughtDashboard() {
                 <p className="text-muted-foreground text-sm md:text-base">Interactive drought monitoring with role-based geographic visibility and SPEI predictions.</p>
               </div>
 
+              <div style={{backgroundColor: 'white'}} className="dark:bg-gray-900 border-2 border-gray-300 dark:border-gray-700 rounded-lg p-6 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1),0_2px_4px_-1px_rgba(0,0,0,0.06)] dark:shadow-lg">
+                <div className="flex items-start gap-3">
+                  <InfoIcon style={{color: 'black'}} className="h-5 w-5 dark:text-white mt-0.5 flex-shrink-0" />
+                  <div className="space-y-2 text-sm">
+                    <p style={{color: 'black'}} className="font-semibold dark:text-white">Quick Start Guide:</p>
+                    <ol className="list-decimal list-inside space-y-1.5">
+                      <li style={{color: 'black'}} className="dark:text-white"><strong style={{color: 'black'}} className="font-bold dark:text-white">Select a Region and Woreda</strong> <span style={{color: 'black'}} className="dark:text-white">from the dropdowns on the right to load drought predictions.</span></li>
+                      <li style={{color: 'black'}} className="dark:text-white"><strong style={{color: 'black'}} className="font-bold dark:text-white">Use the Forecast Month slider</strong> <span style={{color: 'black'}} className="dark:text-white">to explore predictions for the last 12 months (updated dynamically).</span></li>
+                      <li style={{color: 'black'}} className="dark:text-white"><strong style={{color: 'black'}} className="font-bold dark:text-white">View the map colors:</strong> <span style={{color: 'black'}} className="dark:text-white">Red/brown = drought conditions, yellow = borderline, green/blue = normal or wetter.</span></li>
+                      <li style={{color: 'black'}} className="dark:text-white"><strong style={{color: 'black'}} className="font-bold dark:text-white">Check Key Metrics below</strong> <span style={{color: 'black'}} className="dark:text-white">to see SPEI values, drought classification, and action phase.</span></li>
+                      <li style={{color: 'black'}} className="dark:text-white"><strong style={{color: 'black'}} className="font-bold dark:text-white">Generate Reports</strong> <span style={{color: 'black'}} className="dark:text-white">from the Reports tab to download detailed CSV data for analysis.</span></li>
+                      <li style={{color: 'black'}} className="dark:text-white"><strong style={{color: 'black'}} className="font-bold dark:text-white">Need help?</strong> <span style={{color: 'black'}} className="dark:text-white">Visit the Help tab for comprehensive FAQs and usage instructions.</span></li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/2">
                   {
@@ -434,10 +457,60 @@ export function DroughtDashboard() {
                     })()
                   }
                   <div className="mt-4 bg-card border rounded p-4">
-                    <div className="flex justify-between items-center mb-2 text-sm"><span>Forecast Month</span><Badge variant="secondary">{currentLabel}</Badge></div>
+                    <div className="flex justify-between items-center mb-2 text-sm">
+                      <span className="flex items-center gap-1">
+                        Forecast Month
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">Drag the slider to explore 12-month drought forecasts. The map and statistics update to show predictions for your selected month.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </span>
+                      <Badge variant="secondary">{currentLabel}</Badge>
+                    </div>
                     <Slider value={yearMonth} onValueChange={setYearMonth} max={11} min={0} step={1} className="w-full" />
                     <div className="flex justify-between text-[10px] text-muted-foreground mt-1"><span>{MIN_DATE_LABEL}</span><span>{END_DATE_LABEL}</span></div>
                   </div>
+                  
+                  <div className="mt-4 bg-card border rounded p-3">
+                    <div className="text-xs font-semibold mb-2 flex items-center gap-1">
+                      Map Legend
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="text-xs">Map colors indicate drought severity. Darker red means more severe drought, while green/blue indicates normal or wetter conditions.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <div className="space-y-1 text-[10px]">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded" style={{backgroundColor: '#8B0000'}}></div>
+                        <span>Extreme Drought (SPEI ≤ -1.5)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded" style={{backgroundColor: '#FF4500'}}></div>
+                        <span>Severe Drought (-1.5 to -1.0)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded" style={{backgroundColor: '#FFA500'}}></div>
+                        <span>Moderate Drought (-1.0 to -0.5)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded" style={{backgroundColor: '#FFFF00'}}></div>
+                        <span>Normal (-0.5 to 0.5)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded" style={{backgroundColor: '#90EE90'}}></div>
+                        <span>No Drought (SPEI &gt; 0.5)</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="mt-4">
                     <AggregateLineChart values={predictions} />
                   </div>
@@ -445,7 +518,17 @@ export function DroughtDashboard() {
                 <div className="w-full md:w-1/2 space-y-4">
                   <div className="bg-card/50 rounded border p-4 space-y-4">
                     <div>
-                      <label className="text-xs font-medium mb-1 block">Region</label>
+                      <label className="text-xs font-medium mb-1 flex items-center gap-1">
+                        Region
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">Select a region based on your role permissions. Your available regions are determined by your user account settings.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </label>
                       <Select value={selectedRegion} onValueChange={(v)=>{const reg=v as Region; setSelectedRegion(reg); setSelectedWoreda(prev=>ensureWoreda(reg, prev))}}>
                         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -454,7 +537,17 @@ export function DroughtDashboard() {
                       </Select>
                     </div>
                     <div>
-                      <label className="text-xs font-medium mb-1 block">Woreda</label>
+                      <label className="text-xs font-medium mb-1 flex items-center gap-1">
+                        Woreda
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">Select a woreda (district) to load detailed drought predictions. The map will show grid-level forecasts for your selected area.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </label>
                       <Select value={selectedWoreda} onValueChange={setSelectedWoreda}>
                         <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
                         <SelectContent>
@@ -475,11 +568,66 @@ export function DroughtDashboard() {
               </div>
 
               <div>
-                <h2 className="text-lg font-semibold mb-3">Key Metrics</h2>
+                <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  Key Metrics
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <InfoIcon className="h-4 w-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">These metrics summarize drought conditions for your selected woreda and month. Values update automatically when you change selections.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Current SPEI</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{hasCurrent ? (currentSPEI as number).toFixed(2) : '—'}</div></CardContent></Card>
-                  <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Classification</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{currentClass}</div></CardContent></Card>
-                  <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Phase</CardTitle></CardHeader><CardContent><div className={`text-2xl font-bold ${currentPhase==='Alert'?'text-red-600':currentPhase==='Warn'?'text-orange-600':'text-green-600'}`}>{currentPhase}</div></CardContent></Card>
+                  <Card>
+                    <CardHeader className="pb-1">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        Current SPEI
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">Standardized Precipitation-Evapotranspiration Index. Negative values indicate drought. Below -0.5 = drought, below -1.0 = severe, below -1.5 = extreme.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent><div className="text-2xl font-bold">{hasCurrent ? (currentSPEI as number).toFixed(2) : '—'}</div></CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-1">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        Classification
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">Drought severity category based on SPEI value: Extreme, Severe, Moderate Drought, Normal, or No Drought.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent><div className="text-2xl font-bold">{currentClass}</div></CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-1">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        Phase
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">Action level: <strong className="text-green-600">Watch</strong> (normal, monitor), <strong className="text-orange-600">Warn</strong> (prepare response), <strong className="text-red-600">Alert</strong> (immediate action needed).</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent><div className={`text-2xl font-bold ${currentPhase==='Alert'?'text-red-600':currentPhase==='Warn'?'text-orange-600':'text-green-600'}`}>{currentPhase}</div></CardContent>
+                  </Card>
                 </div>
               </div>
 
@@ -593,32 +741,94 @@ export function DroughtDashboard() {
                 <h1 className="text-3xl font-bold tracking-tight">Data Sources</h1>
                 <p className="text-sm text-muted-foreground">Data are accessed from Google Earth Engine; we do not host or expose raw data here. The model uses CHIRPS precipitation and TerraClimate PET as inputs for monthly water balance and SPEI‑12.</p>
               </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card>
-                  <CardHeader className="pb-2">
+
+              <div className="grid gap-6 md:grid-cols-3">
+                <Card className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <svg className="h-12 w-12 text-primary" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
                     <CardTitle className="text-sm">CHIRPS Precipitation</CardTitle>
                     <CardDescription>UCSB-CHG/CHIRPS/DAILY</CardDescription>
                   </CardHeader>
-                  <CardContent className="text-xs text-muted-foreground space-y-1">
+                  <CardContent className="text-xs text-muted-foreground space-y-2">
+                    <div className="space-y-1">
                     <p>• Variable: Precipitation (P)</p>
                     <p>• Temporal resolution: Daily (aggregated to monthly totals)</p>
                     <p>• Period used: 2000-01 to 2024-12</p>
                     <p>• Region sampling: 5 km grid over the selected region</p>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <a href="https://www.chc.ucsb.edu/data/chirps" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1">
+                        Visit CHIRPS Website
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
+                    </div>
                   </CardContent>
                 </Card>
-                <Card>
-                  <CardHeader className="pb-2">
+
+                <Card className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <svg className="h-12 w-12 text-primary" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+                        <path d="M12 6V12L16 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                    </div>
                     <CardTitle className="text-sm">TerraClimate PET</CardTitle>
                     <CardDescription>IDAHO_EPSCOR/TERRACLIMATE</CardDescription>
                   </CardHeader>
-                  <CardContent className="text-xs text-muted-foreground space-y-1">
+                  <CardContent className="text-xs text-muted-foreground space-y-2">
+                    <div className="space-y-1">
                     <p>• Variable: Potential Evapotranspiration (PET)</p>
                     <p>• Temporal resolution: Monthly</p>
                     <p>• Period used: 2000-01 to 2024-12</p>
                     <p>• Region sampling: 5 km grid over the selected region</p>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <a href="https://www.climatologylab.org/terraclimate.html" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1">
+                        Visit TerraClimate Website
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <Image src="/earth_engine_icon.png" alt="Google Earth Engine" width={48} height={48} className="rounded" />
+                    </div>
+                    <CardTitle className="text-sm">Google Earth Engine</CardTitle>
+                    <CardDescription>Data Platform & Processing</CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-xs text-muted-foreground space-y-2">
+                    <div className="space-y-1">
+                      <p>• Cloud-based geospatial analysis platform</p>
+                      <p>• Processes petabytes of satellite imagery</p>
+                      <p>• Hosts CHIRPS and TerraClimate datasets</p>
+                      <p>• Enables scalable drought monitoring</p>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <a href="https://earthengine.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1">
+                        Visit Earth Engine
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
+
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">Derived products</CardTitle>
@@ -628,6 +838,41 @@ export function DroughtDashboard() {
                   <p>• Monthly CWB: P (monthly) − PET (monthly)</p>
                   <p>• 12‑month rolling sum of CWB</p>
                   <p>• Standardized to Z‑scores (SPEI‑12)</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-primary/20">
+                <CardHeader>
+                  <CardTitle className="text-lg">Partner Organizations</CardTitle>
+                  <CardDescription>Supporting institutions and data providers</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                      <div className="flex-shrink-0">
+                        <Image src="/ethiopian-disaster-risk-management-commission-logo.jpg" alt="Ethiopian DRM" width={40} height={40} className="rounded" />
+                      </div>
+                      <div className="text-sm">
+                        <div className="font-semibold">Ethiopian Disaster Risk Management Commission</div>
+                        <p className="text-xs text-muted-foreground mt-1">Coordinates national disaster preparedness and early warning systems across Ethiopia.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                      <div className="flex-shrink-0">
+                        <Image src="/EMI.jpg" alt="Ethiopian Meteorology Institute" width={40} height={40} className="rounded" />
+                      </div>
+                      <div className="text-sm">
+                        <div className="font-semibold">Ethiopian Meteorology Institute</div>
+                        <p className="text-xs text-muted-foreground mt-1">Provides meteorological services, weather forecasting, and climate data for Ethiopia.</p>
+                        <a href="http://www.ethiomet.gov.et/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-xs font-medium mt-2 inline-flex items-center gap-1">
+                          Visit Website
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -697,16 +942,48 @@ export function DroughtDashboard() {
                   <AccordionTrigger className="text-sm">FAQ</AccordionTrigger>
                   <AccordionContent className="text-sm space-y-3">
                     <div>
-                      <p className="font-semibold">Why no data for my woreda?</p>
-                      <p className="text-muted-foreground">Predictions load from an external API on selection. If none appear, ensure a woreda is selected and try another month.</p>
+                      <p className="font-semibold">What is SPEI and how do I interpret it?</p>
+                      <p className="text-muted-foreground">SPEI (Standardized Precipitation-Evapotranspiration Index) measures drought severity by comparing current water balance to historical patterns. Negative values indicate drought: below -0.5 is drought, below -1.0 is severe, and below -1.5 is extreme. Positive values indicate wetter than normal conditions.</p>
                     </div>
                     <div>
-                      <p className="font-semibold">Why do I need to reselect sometimes?</p>
-                      <p className="text-muted-foreground">The view refreshes when region or woreda changes to prevent stale data and ensure fresh API results.</p>
+                      <p className="font-semibold">Why no data for my woreda?</p>
+                      <p className="text-muted-foreground">Predictions load from an external API when you select a woreda. If no data appears, ensure a woreda is selected from the dropdown. The map will show a loading indicator while fetching data. Try selecting another month using the slider if one month shows no data.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">What do the phases (Watch, Warn, Alert) mean?</p>
+                      <p className="text-muted-foreground"><strong>Watch (green):</strong> Normal conditions, continue monitoring. <strong>Warn (orange):</strong> Moderate to severe drought developing, prepare response measures. <strong>Alert (red):</strong> Extreme drought conditions, immediate action recommended.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">How accurate are the forecasts?</p>
+                      <p className="text-muted-foreground">The model provides 12-month forecasts trained on historical satellite data (2000-2024). Near-term forecasts (1-3 months) are more reliable than longer-term predictions. The accuracy indicator on the dashboard shows conceptual confidence decay over time.</p>
                     </div>
                     <div>
                       <p className="font-semibold">Can I export data?</p>
-                      <p className="text-muted-foreground">A CSV export is planned from the Data section.</p>
+                      <p className="text-muted-foreground">Yes! Go to the Reports section to generate and download data in CSV format. You can choose between woreda-level aggregated reports or detailed pixel-level reports that preserve individual grid point data for spatial analysis.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">What is the difference between woreda-level and pixel-level reports?</p>
+                      <p className="text-muted-foreground">Woreda-level reports show a single average SPEI value for the entire administrative area, making them easy to interpret. Pixel-level reports include individual predictions for each ~5km grid point within the woreda, preserving spatial detail for identifying localized drought hotspots.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">Why do I need to reselect sometimes?</p>
+                      <p className="text-muted-foreground">The view refreshes when you change region or woreda to prevent showing stale data and ensure fresh API results. This guarantees you always see the most current predictions for your selected area.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">What data sources are used?</p>
+                      <p className="text-muted-foreground">The system uses CHIRPS precipitation data (daily rainfall from 2000-2024) and TerraClimate potential evapotranspiration data, both accessed via Google Earth Engine. These are combined to calculate monthly water balance and 12-month SPEI values at ~5km resolution.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">How do I use the month slider?</p>
+                      <p className="text-muted-foreground">Drag the slider or click along it to explore forecasts for different months (August 2025 through July 2026). The map colors and statistics update automatically to show predicted drought conditions for your selected month.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">What are the colored areas on the map?</p>
+                      <p className="text-muted-foreground">Map colors represent SPEI values: red/brown indicates drought conditions, yellow is borderline, and green/blue indicates normal or wetter conditions. Click on woredas (if your role permits) to load detailed predictions for that area.</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold">Can I compare different regions or woredas?</p>
+                      <p className="text-muted-foreground">Yes! Regional officers and admins can use the comparison chart at the bottom of the Dashboard. Admins can compare entire regions, while regional officers can compare woredas within their assigned region. This helps identify areas needing priority attention.</p>
                     </div>
                   </AccordionContent>
                 </AccordionItem>
@@ -723,5 +1000,6 @@ export function DroughtDashboard() {
         </main>
       </div>
     </div>
+    </TooltipProvider>
   )
 }
