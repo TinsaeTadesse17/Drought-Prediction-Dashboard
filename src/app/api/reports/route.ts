@@ -38,13 +38,37 @@ export async function POST(req: Request) {
     const type = body.type || 'both'
     if (!woreda) return NextResponse.json({ error: 'Missing woreda' }, { status: 400 })
 
+    // Construct the URL for internal API call
     const origin = process.env.APP_ORIGIN || process.env.NEXT_PUBLIC_APP_ORIGIN || process.env.NEXTAUTH_URL || 'http://localhost:3000'
     const u = new URL(`${origin}/api/predictions`)
     if (region) u.searchParams.set('region', region)
     u.searchParams.set('woreda', woreda)
 
-    const res = await fetch(u.toString(), { cache: 'no-store' })
-    if (!res.ok) return NextResponse.json({ error: 'predictions upstream failed' }, { status: 502 })
+    console.log('Fetching predictions from:', u.toString())
+
+    let res: Response
+    try {
+      res = await fetch(u.toString(), { 
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+    } catch (fetchError: any) {
+      console.error('Fetch error:', fetchError.message)
+      return NextResponse.json({ 
+        error: `Failed to fetch predictions: ${fetchError.message}. URL: ${u.toString()}` 
+      }, { status: 502 })
+    }
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      console.error('Predictions API error:', res.status, errorText)
+      return NextResponse.json({ 
+        error: `Predictions upstream failed (${res.status}): ${errorText}` 
+      }, { status: 502 })
+    }
+
     const data = await res.json()
 
     const agg: number[] = Array.isArray(data?.aggregated_prediction) ? numeric(data.aggregated_prediction).slice(0,12) : []
@@ -57,6 +81,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ woreda, region, monthly: monthlyReport, summary, dailyApprox, points })
   } catch (e:any) {
+    console.error('Reports route error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })
   }
 }
