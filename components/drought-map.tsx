@@ -83,10 +83,18 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
           return
         }
 
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        // Hide map container initially to prevent showing background tiles
+        container.style.visibility = 'hidden'
+        container.style.opacity = '0'
+        
+        // Store tile layer reference - we'll add it only when overlays are ready
+        const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
           maxZoom: 19,
-        }).addTo(mapInstance.current)
+        })
+        
+        // Store tile layer ref to add later
+        ;(mapInstance.current as any)._tileLayer = tileLayer
 
         const invalidate = () => mapInstance.current && mapInstance.current.invalidateSize()
         mapInstance.current.whenReady(invalidate)
@@ -414,6 +422,15 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         pointsLayerRef.current = null
       }
       setReady(true)
+      // Show map container only when overlays are ready
+      if (mapRef.current && mapInstance.current) {
+        mapRef.current.style.visibility = 'visible'
+        // Add tile layer now that overlays are ready
+        const tileLayer = (mapInstance.current as any)._tileLayer
+        if (tileLayer && !mapInstance.current.hasLayer(tileLayer)) {
+          tileLayer.addTo(mapInstance.current)
+        }
+      }
       return
     }
     // Do NOT clip after freezing positions—keep markers where they first loaded
@@ -567,6 +584,15 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     } catch {}
 
     setReady(true)
+    // Show map container only when overlays are ready
+    if (mapRef.current && mapInstance.current) {
+      mapRef.current.style.visibility = 'visible'
+      // Add tile layer now that overlays are ready
+      const tileLayer = (mapInstance.current as any)._tileLayer
+      if (tileLayer && !mapInstance.current.hasLayer(tileLayer)) {
+        tileLayer.addTo(mapInstance.current)
+      }
+    }
   }
 
   useEffect(() => {
@@ -621,11 +647,26 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     return s.replace(/[&<>"']/g, (c) => map[c] ?? c)
   }
 
+  // Sync visibility with ready state
+  useEffect(() => {
+    if (mapRef.current && mapInstance.current) {
+      if (ready) {
+        mapRef.current.style.visibility = 'visible'
+        mapRef.current.style.opacity = '1'
+        // Ensure tile layer is added when ready
+        const tileLayer = (mapInstance.current as any)._tileLayer
+        if (tileLayer && !mapInstance.current.hasLayer(tileLayer)) {
+          tileLayer.addTo(mapInstance.current)
+        }
+      }
+    }
+  }, [ready])
+
   return (
     <div
       ref={mapRef}
       className={`relative w-full h-[500px] rounded-md border border-border overflow-hidden transition-opacity ${ready ? "opacity-100" : "opacity-0"} ${disableInteraction ? "pointer-events-none opacity-40" : ""}`}
-      style={{ height: "500px" }}
+      style={{ height: "500px", visibility: ready ? "visible" : "hidden" }}
     />
   )
 }

@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo, memo } from "react"
 import { Line, LineChart, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart"
 
@@ -12,15 +13,18 @@ const monthLabels = [
   "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"
 ]
 
-export function AggregateLineChart({ values, title = "Aggregated SPEI (12 months)" }: Props) {
-  const data = (values?.length ? values : Array(12).fill(null)).map((v, i) => ({
-    idx: i,
-    month: monthLabels[i % monthLabels.length],
-    spei: typeof v === 'number' ? Number(v) : null
-  }))
+function AggregateLineChart({ values, title = "Aggregated SPEI (12 months)" }: Props) {
+  // Memoize data transformation to prevent recalculation on every render
+  const data = useMemo(() => {
+    return (values?.length ? values : Array(12).fill(null)).map((v, i) => ({
+      idx: i,
+      month: monthLabels[i % monthLabels.length],
+      spei: typeof v === 'number' ? Number(v) : null
+    }))
+  }, [values])
 
-  // Compute an auto-zoomed Y domain around the data to make small slopes visible.
-  const domain = (() => {
+  // Memoize domain calculation to prevent recalculation on every render
+  const domain = useMemo(() => {
     const nums = (values || []).filter((x) => typeof x === 'number' && Number.isFinite(x)) as number[]
     if (!nums.length) return [-1, 1]
     let min = Math.min(...nums)
@@ -40,7 +44,7 @@ export function AggregateLineChart({ values, title = "Aggregated SPEI (12 months
     max = Math.min(max, 3)
     if (min >= max) return [-1, 1]
     return [min, max]
-  })()
+  }, [values])
 
   return (
     <ChartContainer
@@ -77,3 +81,7 @@ export function AggregateLineChart({ values, title = "Aggregated SPEI (12 months
     </ChartContainer>
   )
 }
+
+// Export memoized version to prevent unnecessary re-renders
+export default memo(AggregateLineChart)
+export { AggregateLineChart }

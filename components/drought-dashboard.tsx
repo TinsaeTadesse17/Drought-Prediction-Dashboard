@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useRef } from "react"
+import { useMemo, useState, useEffect, useRef, useCallback, memo } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { User as UserIcon, Menu } from "lucide-react"
 import { DroughtMap } from "@/components/drought-map"
-import { AggregateLineChart } from "@/components/aggregate-line-chart"
+import AggregateLineChart from "@/components/aggregate-line-chart"
 import type { Region } from "@/lib/regions"
 import { REGION_WOREDAS } from "@/lib/regions"
 import { getCurrentUser, loginByEmail, logout as authLogout } from "@/lib/auth"
@@ -57,11 +57,67 @@ async function fetchPredictions(region: Region, woreda?: string, _opts?: { aggre
 
 // Data sources are pulled from GEE; we do not host datasets here.
 
+// Memoized Nav Item Button - defined outside component to prevent hooks violations
+const NavItemButton = memo(({ tab, activeTab, onClick }: { tab: string, activeTab: string, onClick: (tab: string) => void }) => (
+  <button
+    onClick={() => onClick(tab)}
+    className={`px-2 py-2 text-sm font-medium transition-colors ${activeTab===tab?"text-primary border-b-2 border-primary":"text-muted-foreground hover:text-foreground"}`}
+  >
+    {tab}
+  </button>
+))
+
+// Memoized Mobile Menu Button - defined outside component to prevent hooks violations
+const MobileMenuButton = memo(({ onClick }: { onClick: () => void }) => (
+  <button className="md:hidden p-2 rounded hover:bg-accent" onClick={onClick} aria-label="Menu">
+    <Menu className="h-5 w-5" />
+  </button>
+))
+
+// Helper function for shallow object comparison
+const shallowEqualObjects = (obj1: Record<string, any>, obj2: Record<string, any>): boolean => {
+  const keys1 = Object.keys(obj1)
+  const keys2 = Object.keys(obj2)
+  if (keys1.length !== keys2.length) return false
+  for (const key of keys1) {
+    if (obj1[key] !== obj2[key]) return false
+  }
+  return true
+}
+
+// Helper function for array comparison
+const shallowEqualArrays = (arr1: any[], arr2: any[]): boolean => {
+  if (arr1.length !== arr2.length) return false
+  for (let i = 0; i < arr1.length; i++) {
+    if (arr1[i] !== arr2[i]) return false
+  }
+  return true
+}
+
+// Memoized DroughtMap to prevent unnecessary re-renders
+const MemoizedDroughtMap = memo(DroughtMap, (prevProps, nextProps) => {
+  // Custom comparison function for better performance
+  return (
+    prevProps.region === nextProps.region &&
+    prevProps.woreda === nextProps.woreda &&
+    prevProps.monthIndex === nextProps.monthIndex &&
+    prevProps.loading === nextProps.loading &&
+    prevProps.disableInteraction === nextProps.disableInteraction &&
+    prevProps.predictions === nextProps.predictions &&
+    prevProps.points === nextProps.points &&
+    prevProps.showRegions === nextProps.showRegions &&
+    shallowEqualObjects(prevProps.predictionsByWoreda || {}, nextProps.predictionsByWoreda || {}) &&
+    shallowEqualArrays(prevProps.allowedWoredas || [], nextProps.allowedWoredas || [])
+  )
+})
+
 export function DroughtDashboard() {
   const [activeTab, setActiveTab] = useState("Dashboard")
   const [selectedRegion, setSelectedRegion] = useState<Region | undefined>("afar")
   const [selectedWoreda, setSelectedWoreda] = useState<string | undefined>(undefined)
   const [yearMonth, setYearMonth] = useState([0])
+  const [localYearMonth, setLocalYearMonth] = useState([0]) // Local state for slider to prevent lag
+  const sliderTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Ref for debounce timeout
   const [lang, setLang] = useState("en")
   const [translatedTitle, setTranslatedTitle] = useState<string | null>(null)
   const { data: session } = useSession()
@@ -178,7 +234,8 @@ export function DroughtDashboard() {
     return REGION_WOREDAS[selectedRegion]
   }, [user, selectedRegion])
 
-  const ensureWoreda = (reg?: Region, w?: string) => {
+  // Memoize ensureWoreda to prevent recreation on every render
+  const ensureWoreda = useCallback((reg?: Region, w?: string) => {
     if (!reg) return undefined
     if (!w) {
       if (user?.role === "woreda_officer") {
@@ -192,7 +249,69 @@ export function DroughtDashboard() {
       return uw && REGION_WOREDAS[reg].includes(uw) ? uw : undefined
     }
     return REGION_WOREDAS[reg].includes(w) ? w : undefined
-  }
+  }, [user])
+
+  // Memoize region change handler
+  const handleRegionChange = useCallback((v: string) => {
+    const reg = v as Region
+    setSelectedRegion(reg)
+    setSelectedWoreda(prev => ensureWoreda(reg, prev))
+  }, [ensureWoreda])
+
+  // Memoize woreda change handler
+  const handleWoredaChange = useCallback((v: string) => {
+    setSelectedWoreda(v)
+  }, [])
+
+  // Memoize tab change handler
+  const handleTabChange = useCallback((tab: string) => {
+    setActiveTab(tab)
+    setMobileNavOpen(false)
+  }, [])
+
+  // Memoize mobile menu toggle handler
+  const handleMobileMenuToggle = useCallback(() => {
+    setMobileNavOpen(o => !o)
+  }, [])
+
+  // Memoize year month change handler with debouncing for smooth slider
+  const handleYearMonthChange = useCallback((value: number[]) => {
+    // Update local state immediately for responsive slider
+    setLocalYearMonth(value)
+    // Clear previous timeout
+    if (sliderTimeoutRef.current) {
+      clearTimeout(sliderTimeoutRef.current)
+    }
+    // Debounce the actual state update to prevent lag
+    sliderTimeoutRef.current = setTimeout(() => {
+      setYearMonth(value)
+      sliderTimeoutRef.current = null
+    }, 100) // 100ms debounce - balances responsiveness and performance
+  }, [])
+
+  // Sync localYearMonth with yearMonth when it changes externally
+  useEffect(() => {
+    setLocalYearMonth(yearMonth)
+  }, [yearMonth])
+
+  // Cleanup slider timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (sliderTimeoutRef.current) {
+        clearTimeout(sliderTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Memoize compare mode change handler
+  const handleCompareModeChange = useCallback((v: string) => {
+    setCompareMode(v as 'regions'|'woredas')
+  }, [])
+
+  // Memoize compare region change handler
+  const handleCompareRegionChange = useCallback((v: string) => {
+    setCompareRegion(v as Region)
+  }, [])
 
   useEffect(() => {
     const run = async () => {
@@ -206,34 +325,129 @@ export function DroughtDashboard() {
     run()
   }, [lang])
 
-  const monthIndex = yearMonth[0]
-  const currentSPEI = predictions[monthIndex]
-  const hasCurrent = typeof currentSPEI === 'number' && Number.isFinite(currentSPEI)
-  const currentClass = hasCurrent ? classifySPEI(currentSPEI as number) : 'No Data'
-  const currentPhase = hasCurrent ? phaseFromClass(currentClass) : '—'
+  // Memoize current SPEI calculations to avoid recalculation on every render
+  const { monthIndex, currentSPEI, hasCurrent, currentClass, currentPhase } = useMemo(() => {
+    const idx = yearMonth[0]
+    const spei = predictions[idx]
+    const has = typeof spei === 'number' && Number.isFinite(spei)
+    const cls = has ? classifySPEI(spei as number) : 'No Data'
+    const ph = has ? phaseFromClass(cls) : '—'
+    return {
+      monthIndex: idx,
+      currentSPEI: spei,
+      hasCurrent: has,
+      currentClass: cls,
+      currentPhase: ph
+    }
+  }, [yearMonth, predictions])
   // Notifications are not implemented; removed mock email alert side-effect
 
-  useEffect(()=>{
-    if (!session) return
+  // Memoize predictions by woreda to prevent recalculation
+  const predsByW = useMemo(() => {
+    const predsByW: Record<string, number[]> = {}
+    if (selectedRegion) {
+      for (const w of REGION_WOREDAS[selectedRegion] || []) predsByW[w] = woredaPredictions[w] || []
+    }
+    return predsByW
+  }, [selectedRegion, woredaPredictions])
+
+  // Memoize showRegions to prevent recalculation
+  const showRegions = useMemo(() => {
+    return (user && user.role === 'admin' && !selectedWoreda && !selectedRegion) ? ['afar','somali'] as Region[] : undefined
+  }, [user, selectedWoreda, selectedRegion])
+
+  // Memoize region comparison table rows unconditionally
+  const regionComparisonRows = useMemo(() => {
+    return (['afar','somali'] as Region[]).map(r => {
+      const preds = regionPredictions[r] || []
+      const val = preds[monthIndex]
+      const hasVal = typeof val === 'number' && Number.isFinite(val)
+      const cls = hasVal ? classifySPEI(val as number) : 'No Data'
+      const ph = phaseFromClass(cls)
+      return {
+        key: r,
+        region: r,
+        val,
+        hasVal,
+        cls,
+        ph
+      }
+    })
+  }, [regionPredictions, monthIndex])
+
+  // Memoize woreda comparison table rows unconditionally
+  const woredaComparisonRows = useMemo(() => {
+    if (!user) return []
+    const region = (user.role==='regional_officer'? user.placeOfInterest.region : compareRegion) as Region
+    return REGION_WOREDAS[region].map(w => {
+      const preds = woredaPredictions[w] || []
+      const val = preds[monthIndex]
+      const hasVal = typeof val === 'number' && Number.isFinite(val)
+      const cls = hasVal ? classifySPEI(val as number) : 'No Data'
+      const ph = phaseFromClass(cls)
+      return {
+        key: w,
+        woreda: w,
+        val,
+        hasVal,
+        cls,
+        ph
+      }
+    })
+  }, [user, compareRegion, woredaPredictions, monthIndex])
+
+  // AggregateLineChart is now memoized in its own file
+
+  // Memoize user object to prevent unnecessary re-renders
+  const sessionUser = useMemo(() => {
+    if (!session) return null
     const sessRegion = (session as any).region || 'afar'
     const sessWoreda = (session as any).woreda
     const role = (session as any).role || 'admin'
-    setUser({ role, allowedRegions: role === 'admin' ? ['afar','somali'] : [sessRegion], placeOfInterest: { region: sessRegion, woreda: sessWoreda } })
-    // For admin don't auto-select a region on login; let them pick
-  if (role === 'admin') setSelectedRegion(undefined as any)
-  else setSelectedRegion(sessRegion)
-    // Only auto-select a woreda for users whose role is 'woreda_officer'
-    if (role === 'woreda_officer') setSelectedWoreda(sessWoreda)
-    else setSelectedWoreda(undefined)
+    return { 
+      role, 
+      allowedRegions: role === 'admin' ? ['afar','somali'] : [sessRegion], 
+      placeOfInterest: { region: sessRegion, woreda: sessWoreda } 
+    }
   }, [session])
 
-  const handleLogout = async () => {
+  useEffect(() => {
+    if (!sessionUser) return
+    // Only update if user actually changed
+    setUser((prev: any) => {
+      if (prev?.role === sessionUser.role && 
+          prev?.placeOfInterest?.region === sessionUser.placeOfInterest.region &&
+          prev?.placeOfInterest?.woreda === sessionUser.placeOfInterest.woreda) {
+        return prev // No change, return same reference
+      }
+      return sessionUser
+    })
+    // Batch region/woreda updates
+    const role = sessionUser.role
+    const sessRegion = sessionUser.placeOfInterest.region
+    const sessWoreda = sessionUser.placeOfInterest.woreda
+    
+    if (role === 'admin') {
+      setSelectedRegion((prev: Region | undefined) => prev === undefined ? prev : undefined as any)
+    } else {
+      setSelectedRegion((prev: Region | undefined) => prev === sessRegion ? prev : sessRegion)
+    }
+    
+    if (role === 'woreda_officer') {
+      setSelectedWoreda((prev: string | undefined) => prev === sessWoreda ? prev : sessWoreda)
+    } else {
+      setSelectedWoreda((prev: string | undefined) => prev === undefined ? prev : undefined)
+    }
+  }, [sessionUser])
+
+  // Memoize logout handler to prevent re-renders
+  const handleLogout = useCallback(async () => {
     try { authLogout() } catch {}
     setUser(null)
     try { await signOut({ redirect: false }) } catch {}
     setAccountOpen(false)
     router.replace('/auth/login')
-  }
+  }, [router])
 
   const NAV_ITEMS = ["Dashboard", "Data", "Reports", "Help"] as const
 
@@ -246,89 +460,146 @@ export function DroughtDashboard() {
 
   // Reports feature removed
 
+  // Centralized fetching with proper deduplication
+  const loadedWoredasRef = useRef<Set<string>>(new Set())
+  const fetchingWoredasRef = useRef<Set<string>>(new Set()) // Track in-flight requests
+  
+  // Use ref to track woredaPredictions to avoid dependency issues
+  const woredaPredictionsRef = useRef<Record<string, number[]>>({})
   useEffect(() => {
-    const loadAll = async () => {
-      if (!user || user.role !== 'admin' || compareMode !== 'regions') return
-      setComparisonLoading(true)
-      try {
-        const regions: Region[] = ['afar', 'somali']
-        for (const reg of regions) {
-          const woredas = REGION_WOREDAS[reg]
-          const entries: [string, number[]][] = []
-          for (const w of woredas) {
-            if (woredaPredictions[w]) continue
-            const resp = await fetchPredictions(reg, w)
-            entries.push([w, resp.aggregated_prediction || []])
-          }
-          if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
-        }
-      } finally { setComparisonLoading(false) }
-    }
-    loadAll()
-  }, [user, compareMode])
+    woredaPredictionsRef.current = woredaPredictions
+  }, [woredaPredictions])
 
-  useEffect(() => {
-    const loadWoredas = async () => {
-      if (!user) return
-      const needWoredaComparison = (user.role === 'regional_officer') || (user.role === 'admin' && compareMode === 'woredas')
-      if (!needWoredaComparison) return
-      setComparisonLoading(true)
-      try {
-        const woredas = REGION_WOREDAS[compareRegion]
-        const entries: [string, number[]][] = []
-        for (const w of woredas) {
-            if (woredaPredictions[w]) { continue }
-            const resp = await fetchPredictions(compareRegion, w)
-            entries.push([w, resp.aggregated_prediction || []])
-        }
-        if (entries.length) {
-          setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
-        }
-      } finally { setComparisonLoading(false) }
+  // Helper function to fetch woreda predictions with deduplication
+  // No dependencies to prevent recreation on every state update
+  const fetchWoredaPredictions = useCallback(async (region: Region, woredas: string[]) => {
+    const toLoad: string[] = []
+    for (const w of woredas) {
+      const key = `${region}:${w}`
+      // Only fetch if not already loaded, not currently fetching, and not in state
+      if (!loadedWoredasRef.current.has(key) && 
+          !fetchingWoredasRef.current.has(key) && 
+          !woredaPredictionsRef.current[w]) {
+        toLoad.push(w)
+        fetchingWoredasRef.current.add(key)
+      }
     }
-    loadWoredas()
-  }, [user, compareMode, compareRegion, woredaPredictions])
+    
+    if (toLoad.length === 0) return
+    
+    try {
+      const entries: [string, number[]][] = []
+      // Fetch in parallel
+      const fetchPromises = toLoad.map(async (w) => {
+        try {
+          const resp = await fetchPredictions(region, w)
+          return [w, resp.aggregated_prediction || []] as [string, number[]]
+        } catch (e) {
+          return null
+        } finally {
+          fetchingWoredasRef.current.delete(`${region}:${w}`)
+        }
+      })
+      
+      const results = await Promise.all(fetchPromises)
+      for (const result of results) {
+        if (result) {
+          entries.push(result)
+          loadedWoredasRef.current.add(`${region}:${result[0]}`)
+        }
+      }
+      
+      if (entries.length) {
+        setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
+      }
+    } catch (e) {
+      // Remove from fetching set on error
+      toLoad.forEach(w => fetchingWoredasRef.current.delete(`${region}:${w}`))
+    }
+  }, []) // No dependencies - stable function
 
+  // Only fetch for comparison when explicitly needed (lazy loading)
+  // Use ref to track if we've already initiated fetch for this mode
+  const comparisonFetchInitiatedRef = useRef<string>('')
+  
+  // Only fetch when Dashboard tab is active AND comparison section is visible
+  // This prevents fetching when user is on other tabs
   useEffect(() => {
-      // Robust auto-selection for woreda restrictions
-      // Also trigger a clear/loading state when the region changes and before a woreda is resolved
+    // Don't fetch if not on Dashboard tab
+    if (activeTab !== 'Dashboard') return
+    if (!user || user.role !== 'admin' || compareMode !== 'regions') return
+    
+    const fetchKey = `admin-regions-${compareMode}`
+    // Only fetch once per mode change
+    if (comparisonFetchInitiatedRef.current === fetchKey) return
+    comparisonFetchInitiatedRef.current = fetchKey
+    
+    // Only fetch when user explicitly views comparison, not on every render
+    fetchWoredaPredictions('afar', REGION_WOREDAS.afar)
+    fetchWoredaPredictions('somali', REGION_WOREDAS.somali)
+  }, [activeTab, user?.role, compareMode])
+
+  // Fetch woredas for comparison mode
+  useEffect(() => {
+    // Don't fetch if not on Dashboard tab
+    if (activeTab !== 'Dashboard') {
+      comparisonFetchInitiatedRef.current = ''
+      return
+    }
+    if (!user) return
+    const needWoredaComparison = (user.role === 'regional_officer') || (user.role === 'admin' && compareMode === 'woredas')
+    if (!needWoredaComparison) {
+      comparisonFetchInitiatedRef.current = ''
+      return
+    }
+    
+    const fetchKey = `${user.role}-woredas-${compareRegion}`
+    // Only fetch once per region change
+    if (comparisonFetchInitiatedRef.current === fetchKey) return
+    comparisonFetchInitiatedRef.current = fetchKey
+    
+    const woredas = REGION_WOREDAS[compareRegion]
+    fetchWoredaPredictions(compareRegion, woredas)
+  }, [activeTab, user?.role, compareMode, compareRegion])
+
+  // Optimized: Batch state updates and prevent unnecessary re-renders
+  useEffect(() => {
+    // Only run when region or allowed woredas change, not on every selectedWoreda change
+    if (!user || user.role !== 'woreda_officer') return
+    
+    // Batch state updates to prevent multiple re-renders
+    const newWoreda = allowedWoredasForRegion.length === 1 
+      ? ensureWoreda(selectedRegion, allowedWoredasForRegion[0])
+      : (allowedWoredasForRegion.length > 0 && !selectedWoreda)
+        ? ensureWoreda(selectedRegion, allowedWoredasForRegion[0])
+        : selectedWoreda
+    
+    if (newWoreda !== selectedWoreda) {
+      setSelectedWoreda(newWoreda)
+    }
+  }, [selectedRegion, allowedWoredasForRegion.length, user?.role, ensureWoreda])
+
+  // Separate effect for clearing data when region changes
+  useEffect(() => {
       setGridPoints([])
       setPredictions([])
-    // Do not show the spinner at region-level; spinner appears only when fetching predictions for a selected woreda
-      // Only auto-select a woreda for 'woreda_officer' users. Admins and regional officers start with no woreda selected.
-      if (user?.role === 'woreda_officer') {
-        if (allowedWoredasForRegion.length === 1) {
-          const only = allowedWoredasForRegion[0]
-          if (selectedWoreda !== only) {
-            setSelectedWoreda(ensureWoreda(selectedRegion, only))
-            return
-          }
-        }
-        if (!selectedWoreda && allowedWoredasForRegion.length > 0) {
-          setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
-          return
-        }
-      }
-      if (selectedWoreda && !allowedWoredasForRegion.includes(selectedWoreda)) {
-        if (allowedWoredasForRegion.length > 0) setSelectedWoreda(ensureWoreda(selectedRegion, allowedWoredasForRegion[0]))
-        else setSelectedWoreda(undefined)
-      }
-    }, [selectedRegion, allowedWoredasForRegion, selectedWoreda])
-
-  useEffect(() => {
-    const loadRegionWoredas = async () => {
-      if (!selectedRegion) return
-      const woredas = REGION_WOREDAS[selectedRegion]
-      const entries: [string, number[]][] = []
-      for (const w of woredas) {
-        if (woredaPredictions[w]) continue
-  const resp = await fetchPredictions(selectedRegion, w)
-  entries.push([w, resp.aggregated_prediction || []])
-      }
-      if (entries.length) setWoredaPredictions(prev => ({ ...prev, ...Object.fromEntries(entries) }))
-    }
-    loadRegionWoredas()
   }, [selectedRegion])
+
+  // Separate effect for validating selected woreda
+  useEffect(() => {
+    if (selectedWoreda && allowedWoredasForRegion.length > 0 && !allowedWoredasForRegion.includes(selectedWoreda)) {
+      const validWoreda = allowedWoredasForRegion.length > 0 
+        ? ensureWoreda(selectedRegion, allowedWoredasForRegion[0])
+        : undefined
+      if (validWoreda !== selectedWoreda) {
+        setSelectedWoreda(validWoreda)
+      }
+    }
+  }, [selectedWoreda, allowedWoredasForRegion, selectedRegion, ensureWoreda])
+
+  // Lazy load woredas for selected region only when needed (not on every region change)
+  // This should only run when user explicitly needs the data, not automatically
+  // Removed automatic fetching - data will be fetched on-demand when comparison is viewed
 
   return (
     <TooltipProvider>
@@ -337,7 +608,7 @@ export function DroughtDashboard() {
       <header className="border-b bg-card sticky top-0 z-[1000] shadow-sm">
         <div className="flex items-center justify-between px-4 md:px-6 py-3">
           <div className="flex items-center gap-3">
-            <button className="md:hidden p-2 rounded hover:bg-accent" onClick={()=>setMobileNavOpen(o=>!o)} aria-label="Menu"><Menu className="h-5 w-5" /></button>
+            <MobileMenuButton onClick={handleMobileMenuToggle} />
             <div className="flex items-center gap-2">
               <Image src="/ethiopian-disaster-risk-management-commission-logo.jpg" alt="Ethiopian DRM Commission" width={40} height={40} className="h-9 w-auto rounded-sm object-contain bg-white p-1" />
               <h1 className="text-base md:text-lg font-semibold">Disaster Risk Management</h1>
@@ -345,17 +616,12 @@ export function DroughtDashboard() {
           </div>
           <nav className="hidden md:flex items-center space-x-6">
             {NAV_ITEMS.map(tab => (
-              <button
+              <NavItemButton
                 key={tab}
-                onClick={() => {
-                  // Keep navbar and show Reports as an in-dashboard tab for consistent shell
-                  setActiveTab(tab)
-                  setMobileNavOpen(false)
-                }}
-                className={`px-2 py-2 text-sm font-medium transition-colors ${activeTab===tab?"text-primary border-b-2 border-primary":"text-muted-foreground hover:text-foreground"}`}
-              >
-                {tab}
-              </button>
+                tab={tab}
+                activeTab={activeTab}
+                onClick={handleTabChange}
+              />
             ))}
           </nav>
           <div className="flex items-center space-x-2">
@@ -394,7 +660,7 @@ export function DroughtDashboard() {
           {NAV_ITEMS.map(tab => (
             <button
               key={tab}
-              onClick={()=>{ setActiveTab(tab); setMobileNavOpen(false) }}
+              onClick={()=>{ handleTabChange(tab) }}
               className={`text-left px-2 py-2 rounded text-sm ${activeTab===tab?"bg-accent text-primary":"hover:bg-accent"}`}
             >
               {tab}
@@ -431,14 +697,7 @@ export function DroughtDashboard() {
 
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/2">
-                  {
-                    (() => {
-                      const predsByW: Record<string, number[]> = {}
-                      if (selectedRegion) {
-                        for (const w of REGION_WOREDAS[selectedRegion] || []) predsByW[w] = woredaPredictions[w] || []
-                      }
-                      return (
-                        <DroughtMap
+                  <MemoizedDroughtMap
                           key={`${selectedRegion || 'none'}:${selectedWoreda || 'none'}`}
                           region={selectedRegion as Region}
                           woreda={selectedWoreda}
@@ -449,13 +708,9 @@ export function DroughtDashboard() {
                           predictionsByWoreda={predsByW}
                           allowedWoredas={allowedWoredasForRegion}
                           points={gridPoints}
-                          onSelectWoreda={setSelectedWoreda}
-                          // When admin is viewing and no woreda selected, allow showing both regions outlines
-                          showRegions={(user && user.role === 'admin' && !selectedWoreda && !selectedRegion) ? ['afar','somali'] : undefined}
+                    onSelectWoreda={handleWoredaChange}
+                    showRegions={showRegions}
                         />
-                      )
-                    })()
-                  }
                   <div className="mt-4 bg-card border rounded p-4">
                     <div className="flex justify-between items-center mb-2 text-sm">
                       <span className="flex items-center gap-1">
@@ -471,7 +726,7 @@ export function DroughtDashboard() {
                       </span>
                       <Badge variant="secondary">{currentLabel}</Badge>
                     </div>
-                    <Slider value={yearMonth} onValueChange={setYearMonth} max={11} min={0} step={1} className="w-full" />
+                    <Slider value={localYearMonth} onValueChange={handleYearMonthChange} max={11} min={0} step={1} className="w-full" />
                     <div className="flex justify-between text-[10px] text-muted-foreground mt-1"><span>{MIN_DATE_LABEL}</span><span>{END_DATE_LABEL}</span></div>
                   </div>
                   
@@ -529,7 +784,7 @@ export function DroughtDashboard() {
                           </TooltipContent>
                         </Tooltip>
                       </label>
-                      <Select value={selectedRegion} onValueChange={(v)=>{const reg=v as Region; setSelectedRegion(reg); setSelectedWoreda(prev=>ensureWoreda(reg, prev))}}>
+                      <Select value={selectedRegion} onValueChange={handleRegionChange}>
                         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {allowedRegions.map(r => <SelectItem key={r} value={r}>{r === 'afar' ? 'Afar' : 'Somali'}</SelectItem>)}
@@ -548,7 +803,7 @@ export function DroughtDashboard() {
                           </TooltipContent>
                         </Tooltip>
                       </label>
-                      <Select value={selectedWoreda} onValueChange={setSelectedWoreda}>
+                      <Select value={selectedWoreda} onValueChange={handleWoredaChange}>
                         <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
                         <SelectContent>
                           {allowedWoredasForRegion.map(w => <SelectItem key={w} value={w}>{w}</SelectItem>)}
@@ -638,7 +893,7 @@ export function DroughtDashboard() {
                       <span>{user.role === 'admin' ? 'Regional & Woreda Comparison' : 'Woreda Comparison'}</span>
                       <div className="flex gap-2 items-center">
                         {user.role === 'admin' && (
-                          <Select value={compareMode} onValueChange={(v)=>setCompareMode(v as 'regions'|'woredas')}>
+                          <Select value={compareMode} onValueChange={handleCompareModeChange}>
                             <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="regions">Regions</SelectItem>
@@ -647,7 +902,7 @@ export function DroughtDashboard() {
                           </Select>
                         )}
                         {(user.role === 'regional_officer' || (user.role==='admin' && compareMode==='woredas')) && (
-                          <Select value={compareRegion} onValueChange={(v)=>{ setCompareRegion(v as Region) }} disabled={user.role==='regional_officer'}>
+                          <Select value={compareRegion} onValueChange={handleCompareRegionChange} disabled={user.role==='regional_officer'}>
                             <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="afar">Afar</SelectItem>
@@ -674,21 +929,14 @@ export function DroughtDashboard() {
                             </tr>
                           </thead>
                           <tbody>
-                            {(['afar','somali'] as Region[]).map(r => {
-                              const preds = regionPredictions[r] || []
-                              const val = preds[monthIndex]
-                              const hasVal = typeof val === 'number' && Number.isFinite(val)
-                              const cls = hasVal ? classifySPEI(val as number) : 'No Data'
-                              const ph = phaseFromClass(cls)
-                              return (
-                                <tr key={r} className="border-t">
-                                  <td className="py-1 capitalize font-medium">{r}</td>
+                            {regionComparisonRows.map(({ key, region, val, hasVal, cls, ph }) => (
+                              <tr key={key} className="border-t">
+                                <td className="py-1 capitalize font-medium">{region}</td>
                                   <td className="py-1 tabular-nums">{hasVal ? (val as number).toFixed(2) : '—'}</td>
                                   <td className="py-1">{cls}</td>
                                   <td className={`py-1 ${ph==='Alert'?'text-red-600':ph==='Warn'?'text-orange-600':'text-green-600'}`}>{ph}</td>
                                 </tr>
-                              )
-                            })}
+                            ))}
                           </tbody>
                         </table>
                       </div>
@@ -705,21 +953,14 @@ export function DroughtDashboard() {
                             </tr>
                           </thead>
                           <tbody>
-                            {REGION_WOREDAS[(user.role==='regional_officer'? user.placeOfInterest.region : compareRegion) as Region].map(w => {
-                              const preds = woredaPredictions[w] || []
-                              const val = preds[monthIndex]
-                              const hasVal = typeof val === 'number' && Number.isFinite(val)
-                              const cls = hasVal ? classifySPEI(val as number) : 'No Data'
-                              const ph = phaseFromClass(cls)
-                              return (
-                                <tr key={w} className="border-t">
-                                  <td className="py-1 font-medium">{w}</td>
+                            {woredaComparisonRows.map(({ key, woreda, val, hasVal, cls, ph }) => (
+                              <tr key={key} className="border-t">
+                                <td className="py-1 font-medium">{woreda}</td>
                                   <td className="py-1 tabular-nums">{hasVal ? (val as number).toFixed(2) : '—'}</td>
                                   <td className="py-1">{cls}</td>
                                   <td className={`py-1 ${ph==='Alert'?'text-red-600':ph==='Warn'?'text-orange-600':'text-green-600'}`}>{ph}</td>
                                 </tr>
-                              )
-                            })}
+                            ))}
                           </tbody>
                         </table>
                         <p className="mt-2 text-[10px] text-muted-foreground">Values are fetched from the external model API.</p>
