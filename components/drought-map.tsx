@@ -87,14 +87,7 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
         container.style.visibility = 'hidden'
         container.style.opacity = '0'
         
-        // Store tile layer reference - we'll add it only when overlays are ready
-        const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 19,
-        })
-        
-        // Store tile layer ref to add later
-        ;(mapInstance.current as any)._tileLayer = tileLayer
+        // Base map tiles removed - not needed for overlay-only display
 
         const invalidate = () => mapInstance.current && mapInstance.current.invalidateSize()
         mapInstance.current.whenReady(invalidate)
@@ -425,11 +418,6 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       // Show map container only when overlays are ready
       if (mapRef.current && mapInstance.current) {
         mapRef.current.style.visibility = 'visible'
-        // Add tile layer now that overlays are ready
-        const tileLayer = (mapInstance.current as any)._tileLayer
-        if (tileLayer && !mapInstance.current.hasLayer(tileLayer)) {
-          tileLayer.addTo(mapInstance.current)
-        }
       }
       return
     }
@@ -587,11 +575,6 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
     // Show map container only when overlays are ready
     if (mapRef.current && mapInstance.current) {
       mapRef.current.style.visibility = 'visible'
-      // Add tile layer now that overlays are ready
-      const tileLayer = (mapInstance.current as any)._tileLayer
-      if (tileLayer && !mapInstance.current.hasLayer(tileLayer)) {
-        tileLayer.addTo(mapInstance.current)
-      }
     }
   }
 
@@ -653,11 +636,6 @@ export function DroughtMap({ region, woreda, disableInteraction, onSelectWoreda,
       if (ready) {
         mapRef.current.style.visibility = 'visible'
         mapRef.current.style.opacity = '1'
-        // Ensure tile layer is added when ready
-        const tileLayer = (mapInstance.current as any)._tileLayer
-        if (tileLayer && !mapInstance.current.hasLayer(tileLayer)) {
-          tileLayer.addTo(mapInstance.current)
-        }
       }
     }
   }, [ready])
